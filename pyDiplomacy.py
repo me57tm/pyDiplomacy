@@ -59,9 +59,9 @@ nwg.set_adj([],nao)
 board["bar"] = bar = Tile("Barent's Sea",False)
 bar.set_adj([],nwg)
 board["stp"] = stp = MultiCoast("Saint Petersburg","North Coast","South Coast")
-board["stp-nc"] = stp.nc
+board["stp_nc"] = stp.nc
 stp.nc.set_adj([],bar)
-board["stp-sc"] = stp.sc
+board["stp_sc"] = stp.sc
 board["fin"] = fin = Tile("Finland")
 fin.set_adj(stp,stp.sc)
 board["bot"] = bot = Tile("Golf of Bothnia",False)
@@ -151,8 +151,8 @@ pie.set_adj([tyr])
 board["mar"] = mar = Tile("Marseilles")
 mar.set_adj([pie,bur,gas],[pie])
 board["spa"] = spa = MultiCoast("Spain","North Coast","South Coast")
-board["spa-nc"] = spa.nc
-board["spa-sc"] = spa.sc
+board["spa_nc"] = spa.nc
+board["spa_sc"] = spa.sc
 spa.set_adj([mar,gas])
 spa.nc.set_adj([],[mao,gas])
 spa.sc.set_adj([],[mao,mar])
@@ -191,8 +191,8 @@ ser.set_adj([tri,bud,alb,rum])
 board["gre"] = gre = Tile("Greece")
 gre.set_adj([alb,ser],[alb,ion])
 board["bul"] = bul = MultiCoast("Bulgaria","East Coast","South Coast")
-board["bul-ec"] = bul.nc
-board["bul-sc"] = bul.sc
+board["bul_ec"] = bul.nc
+board["bul_sc"] = bul.sc
 bul.set_adj([ser,gre,rum])
 bul.nc.set_adj([],rum)
 bul.sc.set_adj([],gre)
@@ -214,11 +214,45 @@ board["syr"] = syr = Tile("Syria")
 syr.set_adj([arm,smy],[smy,eas])
 
 
-for tile in board.values():
-    print("~"+str(tile) +":\nLand: "+str(tile.land_adj)+"\nSea: "+str(tile.sea_adj)+"\n")
+#for tile in board.values():
+    #print("~"+str(tile) +":\nLand: "+str(tile.land_adj)+"\nSea: "+str(tile.sea_adj)+"\n")
+for p in board.keys():
+    print(p+", ",end="")
 
 
-AIPrompt = ("")
-    
-
+AIPrompt = """You are playing a game of diplomacy as {country}. {personality} Along the way you'll have to talk to other players to progress. You must interact with the game through a series of commands.
+    Commands are issued by typing the name of the command followed by a colon (:) followed by the content of the command followed by a pipe (|). You should place a newline after this key punctuation to help readability.
+    The first command is mail, this will send a message to the listed countries allowing you to converse. For example, if you were a Russia player you could issue:
+    mail england, germany:
+    Greetings! I propose a DMZ in the Baltic Sea to ensure mutual security while I focus on southern expansion. Let’s discuss cooperation in the north.|
+    This would signal to those countries you were an ally.
+    The next command is submit. Submit is how you apply your orders. Bear in mind once every player has submitted the turn will end, so it is advisable to wait to submit until you have finished discussions.
+    Orders should be issued with either a for army or f for fleet then the location of the unit a dash (-) and the target location. we will use s for support h for hold and c for convoy. An army not listed in an order set is assumed to be holding.
+    The codes for provinces used by the system are as follows:
+    nao, nwg, bar, stp, stp_nc, stp_sc, fin, bot, swe, nwy, ska, nth, edi, cly, lvp, iri, yor, hel, den, bal, lvn, mos, war, pru, ber, kie, hol, bel, pic, bre, mao, eng, wal, lon, gas, par, bur, ruh, mun, boh, sil, gal, ukr, sev, rum, bud, vie, tyr, pie, mar, spa, spa_nc, spa_sc, por, wes, naf, lyo, tys, tun, tus, rom, nap, ion, apu, ven, adr, tri, alb, ser, gre, bul, bul_ec, bul_sc, bla, con, aeg, eas, smy, ank, arm, syr
+    An example turn one order for a Germany player would be:
+    submit:
+    a ber - kie
+    f kie - den
+    a mun s ven - tyr|
+    """
+AIPrompt = AIPrompt.replace("    ","")
+start_state = "System:\nTurn one, Spring 1901\n---------------------\nThe current board state is as follows...\nAustria,\na bud\nf tri\na vie\nEngland,\nf edi\nf lon\na lvp\nFrance,\nf bre\na mar\na par\nGermany,\na ber\nf kie\na mun\nItaly,\nf nap\na rom\na ven\nRussia\na mos\nf sev\nf stp_sc\na war\nTurkey\nf ank\na con\na smy|\nYou may start issuing commands."
+print("\n"+AIPrompt+"\n"+start_state)
+def eg_import_from_backstabbr():
+    x = []
+    for i in range(50):
+        x.append(input())
+    boardstate = ""
+    for i in x:
+        if i == "":
+            continue
+        i = i.replace("/","_")
+        if i[:2] == "A " or i[:2] == "F ":
+            boardstate = boardstate + i.lower()
+        else:
+            boardstate = boardstate + i +  ","
+        boardstate = boardstate + "\n"
+    print(boardstate)
+    return boardstate
 
