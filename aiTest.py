@@ -13,7 +13,7 @@ client = OpenAI(api_key=OPENAI_KEY)
         {"role": "user", "content": "write a haiku about ai"}
     ]
 )'''
-AIPrompt = """You are playing a game of diplomacy as Italy. Along the way you'll have to talk to other players to progress. You must interact with the game through a series of commands.
+AIPrompt = """You are playing a game of diplomacy as France. Along the way you'll have to talk to other players to progress. You must interact with the game through a series of commands.
     Commands are issued by typing the name of the command followed by a colon (:) followed by the content of the command followed by a pipe (|). You should place a newline after this key punctuation to help readability.
     The first command is mail, this will send a message to the listed countries allowing you to converse. For example, if you were a Russia player you could issue:
     mail england, germany:
@@ -29,15 +29,16 @@ AIPrompt = """You are playing a game of diplomacy as Italy. Along the way you'll
     f kie - den
     a mun s ven - tyr|
     """
+first = "from italy cc austria, germany, france, england, russia, turkey:\nGreetings everyone! As Italy, I aim to establish a balanced relationship with each of you. I would like to discuss potential alliances and strategies to navigate this game effectively. Let's make the most of this turn together! Looking forward to your responses.|"
 AIPrompt = AIPrompt.replace("    ","")
-start_state = "System:\nTurn one, Spring 1901\n---------------------\nThe current board state is as follows...\nAustria,\na bud\nf tri\na vie\nEngland,\nf edi\nf lon\na lvp\nFrance,\nf bre\na mar\na par\nGermany,\na ber\nf kie\na mun\nItaly,\nf nap\na rom\na ven\nRussia\na mos\nf sev\nf stp_sc\na war\nTurkey\nf ank\na con\na smy|\nYou may start issuing commands."
+start_state = "It is Spring 1901\n---------------------\nThe current board state is as follows...\nAustria,\na bud\nf tri\na vie\nEngland,\nf edi\nf lon\na lvp\nFrance,\nf bre\na mar\na par\nGermany,\na ber\nf kie\na mun\nItaly,\nf nap\na rom\na ven\nRussia\na mos\nf sev\nf stp_sc\na war\nTurkey\nf ank\na con\na smy|\nYou may start issuing commands."
 
 response = client.chat.completions.create(
     model="gpt-4o-mini",
     store=True,
     messages=[
-        {"role": "developer", "content": AIPrompt},
-        {"role": "user", "content": start_state}
+        {"role": "developer", "content": "You are an ai who is being tested"},
+        {"role": "user", "content": "please send a short test message"}
     ]
 )
 print(response.choices[0].message.content)
