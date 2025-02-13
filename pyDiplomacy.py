@@ -344,15 +344,20 @@ class OpenAIPlayer(Player):
     a ber - kie
     f kie - den
     a mun s ven - tyr|
+    You may send multiple commands per turn. Please refrain from sending either speial characters in your responses except where required (:|)
     Please only respond with commands in the provided format. They will be handled automatically and will fail to process if malformed.
     """.replace("    ","")
     history = None
 
-    def __init__(self,country,api_key,random_voice=True,personality=""):
+    def __init__(self,country,api_key,model,api_url="",random_voice=True,personality=""):
         super().__init__(country)
         self.history = []
         self.system_prompt = OpenAIPlayer.SYSTEM_PROMPT.format_map({"country":country,"personality":personality})
-        self.client = OpenAI(api_key=api_key)
+        if api_url == "":
+            self.client = OpenAI(api_key=api_key)
+        else:
+            self.client = OpenAI(api_key=api_key,base_url=api_url)
+        self.model = model
 
         if random_voice:
             if random.random() < 0.7:
@@ -379,7 +384,7 @@ class OpenAIPlayer(Player):
 
     def prompt(self,message):
         message_list = [{"role": "developer", "content": self.system_prompt + "\n" + self.startTurn()}] + self.history + [{"role": "user", "content": message}]
-        response = self.client.chat.completions.create(model="gpt-4o", store=True,messages=message_list)
+        response = self.client.chat.completions.create(model=self.model, messages=message_list) # store=True,
         print(response.choices[0].message.content)
         self.history += [{"role": "user", "content": message},{"role": "assistant", "content": response.choices[0].message.content}]
         #self.voice.say(response.choices[0].message.content)
@@ -427,7 +432,7 @@ def process_message(player,message_queue,orders):
     sender = player.country
     if not player.submitted:
         message_queue[sender] += " SYSTEM: You have not yet submitted your moves for this turn you need not do it immediately but the turn will not end until everyone has done so!|"
-    if message_queue[sender] == "":
+    elif message_queue[sender] == "":
         return
     msg = player.prompt(message_queue[sender]).split("|")
     message_queue[sender] = ""
@@ -494,16 +499,18 @@ def process_message(player,message_queue,orders):
             #testout = command[0] + command[1]
             #print(testout + "\n---")
 OPENAI_KEY = environ["OPENAI_API_KEY"]
+GEMINI_KEY = environ["GEMINI_API_KEY"]
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 personality_traits = ["Chaotic"]
-test = OpenAIPlayer("Russia",OPENAI_KEY)
+#test = OpenAIPlayer("Russia",OPENAI_KEY)
 players = [
-    OpenAIPlayer("England",OPENAI_KEY),
-    OpenAIPlayer("Austria",OPENAI_KEY),
-    OpenAIPlayer("Italy",OPENAI_KEY),
-    OpenAIPlayer("Turkey",OPENAI_KEY),
-    OpenAIPlayer("Germany",OPENAI_KEY),
-    OpenAIPlayer("Russia",OPENAI_KEY),
-    OpenAIPlayer("France",OPENAI_KEY),
+    OpenAIPlayer("England",GEMINI_KEY,"gemini-2.0-flash",GEMINI_URL,False),
+    OpenAIPlayer("Austria",GEMINI_KEY,"gemini-2.0-flash",GEMINI_URL,False),
+    OpenAIPlayer("Italy",GEMINI_KEY,"gemini-2.0-flash",GEMINI_URL,False),
+    OpenAIPlayer("Turkey",GEMINI_KEY,"gemini-2.0-flash",GEMINI_URL,False),
+    OpenAIPlayer("Germany",GEMINI_KEY,"gemini-2.0-flash",GEMINI_URL,False),
+    OpenAIPlayer("Russia",GEMINI_KEY,"gemini-2.0-flash",GEMINI_URL,False),
+    OpenAIPlayer("France",GEMINI_KEY,"gemini-2.0-flash",GEMINI_URL,False),
     ]
 #print("------------------------"*4)
 #print("Russia"+"'s Turn")
@@ -526,8 +533,9 @@ def turn_finished(orders):
 i = 0
 while not turn_finished(orders):
     print("------------------------"*2)
-    print(players[i].country+"'s Turn")
+    print(players[i].country+"'s Turn (Queue Length: "+str(len(orders[players[i].country])))
     process_message(players[i],message_queue,orders)
+    sleep(4)
     i = (i+1) % 7
 
 for player in players:

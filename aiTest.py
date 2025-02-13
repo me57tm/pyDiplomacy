@@ -4,9 +4,9 @@ import random
 
 #DEEPSEEK_KEY = environ["DEEPSEEK_API_KEY"]
 #client = OpenAI(api_key=DEEPSEEK_KEY, base_url="https://api.deepseek.com")
-OPENAI_KEY = environ["OPENAI_API_KEY"]
+OPENAI_KEY = environ["GEMINI_API_KEY"]
 
-client = OpenAI(api_key=OPENAI_KEY)
+client = OpenAI(api_key=OPENAI_KEY,base_url="https://generativelanguage.googleapis.com/v1beta/openai/")
 '''response = client.chat.completions.create(
     model="gpt-4o-mini",
     store=True,
@@ -35,8 +35,7 @@ AIPrompt = AIPrompt.replace("    ","")
 start_state = "It is Spring 1901\n---------------------\nThe current board state is as follows...\nAustria,\na bud\nf tri\na vie\nEngland,\nf edi\nf lon\na lvp\nFrance,\nf bre\na mar\na par\nGermany,\na ber\nf kie\na mun\nItaly,\nf nap\na rom\na ven\nRussia\na mos\nf sev\nf stp_sc\na war\nTurkey\nf ank\na con\na smy|\nYou may start issuing commands."
 
 response = client.chat.completions.create(
-    model="gpt-4o-mini",
-    store=True,
+    model="gemini-2.0-flash",
     messages=[
         {"role": "developer", "content": "You are an ai who is being tested"},
         {"role": "user", "content": "please send a short test message"}
