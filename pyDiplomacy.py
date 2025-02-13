@@ -285,6 +285,7 @@ class Player():
     country = ""
     turn = 0
     gc = None
+    submitted = False
 
     def __init__(self,country):
         self.country = country
@@ -381,7 +382,7 @@ class OpenAIPlayer(Player):
         response = self.client.chat.completions.create(model="gpt-4o", store=True,messages=message_list)
         print(response.choices[0].message.content)
         self.history += [{"role": "user", "content": message},{"role": "assistant", "content": response.choices[0].message.content}]
-        self.voice.say(response.choices[0].message.content)
+        #self.voice.say(response.choices[0].message.content)
         return response.choices[0].message.content
         
 
@@ -405,32 +406,8 @@ def backstabImport():
     global board_state
     board_state = boardstate + "|"
 
-OPENAI_KEY = environ["OPENAI_API_KEY"]
-personality_traits = ["Chaotic"]
-test = OpenAIPlayer("Russia",OPENAI_KEY)
-players = [
-    OpenAIPlayer("England",OPENAI_KEY),
-    OpenAIPlayer("Austria",OPENAI_KEY),
-    OpenAIPlayer("Italy",OPENAI_KEY),
-    OpenAIPlayer("Turkey",OPENAI_KEY),
-    OpenAIPlayer("Germany",OPENAI_KEY),
-    OpenAIPlayer("Russia",OPENAI_KEY),
-    OpenAIPlayer("France",OPENAI_KEY),
-    ]
-'''for p in players:
-    print(p.country + ",",end="\n")
-    for a in p.gc.armies:
-        print("a " + a.abbr,end="\n")
-    for f in p.gc.fleets:
-        print("f " + f.abbr,end="\n")'''
-
 message_queue = {"England":"","Austria":"","Italy":"","Turkey":"","Germany":"","Russia":"","France":""}
-
-'''for player in players:
-    print("------------------------"*6)
-    print(player.country+"'s Turn")
-    player.prompt("Please make your first move!")'''
-
+orders = message_queue.copy()
 
 #from russia
 msg = """mail england, germany: 
@@ -446,8 +423,112 @@ a mos - ukr
 f sev - bla
 f stp_sc - bot
 a war - gal|"""
+def process_message(player,message_queue,orders):
+    sender = player.country
+    if not player.submitted:
+        message_queue[sender] += " SYSTEM: You have not yet submitted your moves for this turn you need not do it immediately but the turn will not end until everyone has done so!|"
+    if message_queue[sender] == "":
+        return
+    msg = player.prompt(message_queue[sender]).split("|")
+    message_queue[sender] = ""
+    commands = []
+    for i in range(len(msg)):
+        #print("msg start",msg[i],"msg end")
+        while msg[i] != "" and msg[i][0] == "\n":
+            msg[i] = msg[i][1:]
+        if msg[i] == "":
+            continue
+        commands.append(msg[i].split(":"))
 
-msg = msg.split("|")
-for i in range(len(msg)):
-    msg[i] = msg[i].replace("\n","")
-    msg[i] = msg[i].split(":")
+    for command in commands:
+        #print(command)
+        if command == [""]:
+            continue
+        elif command[0][:4] == "mail":
+            mailto = command[0][5:].split(", ")
+            for countryi in mailto:
+                cc = []
+                for countryj in mailto:
+                    if countryi != countryj:
+                        cc.append(countryj)
+                message = "From " + sender
+                if len(cc) > 0:
+                    message += " cc "
+                    for countryj in cc:
+                        message += countryj + ", "
+                    message = message[:-2]
+                message += ":" + command[1] + "|\n"
+                #print("(to "+countryi+")")
+                #print(message + "---")
+                message_queue[countryi.title()] += message
+                    
+        else:
+            print(command)
+            global board
+            verbose_orders = ""
+            for move in command[1].split("\n"):
+                if len(move) > 0:
+                    verbose_orders += "\t"
+                for action in move.split(" "):
+                    if action == "":
+                        continue
+                    elif action == "a":
+                        verbose_orders += "Army "
+                    elif action == "f":
+                        verbose_orders += "Fleet "
+                    elif action == "s":
+                        verbose_orders += "supports "
+                    elif action == "c":
+                        verbose_orders += "convoys "
+                    elif action == "h":
+                        verbose_orders += "holds"
+                    elif action == "-":
+                        verbose_orders += "⮞ "
+                    else:
+                        verbose_orders += str(board[action]) + " "
+                if len(move) > 0:
+                    verbose_orders = verbose_orders[:-1] + "\n"
+            #print("Orders from: "+sender + "\n"+verbose_orders)
+            orders[sender] = verbose_orders
+            player.sumbitted = True
+            #testout = command[0] + command[1]
+            #print(testout + "\n---")
+OPENAI_KEY = environ["OPENAI_API_KEY"]
+personality_traits = ["Chaotic"]
+test = OpenAIPlayer("Russia",OPENAI_KEY)
+players = [
+    OpenAIPlayer("England",OPENAI_KEY),
+    OpenAIPlayer("Austria",OPENAI_KEY),
+    OpenAIPlayer("Italy",OPENAI_KEY),
+    OpenAIPlayer("Turkey",OPENAI_KEY),
+    OpenAIPlayer("Germany",OPENAI_KEY),
+    OpenAIPlayer("Russia",OPENAI_KEY),
+    OpenAIPlayer("France",OPENAI_KEY),
+    ]
+#print("------------------------"*4)
+#print("Russia"+"'s Turn")
+#print(msg)
+#process_message(msg,"Russia",message_queue,orders)
+#players[5].history = [{"role":"assistant","content":msg}]
+'''for p in players:
+    print(p.country + ",",end="\n")
+    for a in p.gc.armies:
+        print("a " + a.abbr,end="\n")
+    for f in p.gc.fleets:
+        print("f " + f.abbr,end="\n")'''
+
+def turn_finished(orders):
+    for order in orders.values():
+        if order == "":
+            return False
+    return True
+
+i = 0
+while not turn_finished(orders):
+    print("------------------------"*2)
+    print(players[i].country+"'s Turn")
+    process_message(players[i],message_queue,orders)
+    i = (i+1) % 7
+
+for player in players:
+    print(player.country + "'s Orders:\n" + orders[player.country])

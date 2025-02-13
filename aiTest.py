@@ -1,5 +1,6 @@
 from os import environ
 from openai import OpenAI
+import random
 
 #DEEPSEEK_KEY = environ["DEEPSEEK_API_KEY"]
 #client = OpenAI(api_key=DEEPSEEK_KEY, base_url="https://api.deepseek.com")
