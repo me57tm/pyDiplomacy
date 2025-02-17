@@ -373,8 +373,7 @@ class Player:
 
     def start_turn(self):
         season = "Spring" if self.turn % 3 == 0 else "Autumn" if self.turn % 3 == 1 else "Winter"
-        sub = "You have not yet submitted your moves for this turn! You need not do it immediately but the turn will not end until everyone has done so!" if not self.submitted else "Your orders for this turn have been submitted. Waiting for other players. You may resubmit orders if you want to change them."
-        return f"It is turn {self.turn + 1}; {season} {self.turn // 3 + 1901}\nThe current state of the board is…\n{board_state}. {sub}\n"
+        return f"It is turn {self.turn + 1}; {season} {self.turn // 3 + 1901}\nThe current state of the board is…\n{board_state}.\n"
 
     def prompt(self, message):
         raise NotImplementedError
@@ -671,3 +670,8 @@ for country, order in orders.items():
     fo.write(country + "," + order + "|")
 for player in players:
     player.dump_history()
+#Turn one of discussion, no orders will be submitted
+#0 out of 7 players have submitted orders.
+#You have not submitted orders. x of 7 players have.
+#x out of 7 players, including you, have submitted orders.
+#All Players have submitted. Orders are as follows:

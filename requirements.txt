@@ -2,3 +2,4 @@ pyttsx3
 gTTS
 openai
 pygame
+pydantic
