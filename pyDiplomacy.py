@@ -4,15 +4,18 @@ import pyttsx3
 import requests
 import random
 import json
+from enum import Enum
 from pygame import mixer
 from time import sleep
 from os import environ
 from openai import OpenAI
+from pydantic import BaseModel, Field
+from types import SimpleNamespace
 
 mixer.init()
 
 
-class Tile:
+class Tile():
     name = ""
     abbr = ""
     land_adj = None
@@ -31,7 +34,9 @@ class Tile:
         return self.name
 
     def __repr__(self):
-        return self.name
+        return self.abbr
+    def __eq__(self,t):
+        return self.abbr == t.abbr
 
     def set_adj(self, land_tiles=[], sea_tiles=[]):
         if not isinstance(land_tiles, list):
@@ -47,6 +52,7 @@ class Tile:
 
     def set_unit(self, unit):
         self.unit = unit
+        return self
 
 
 class CoastOnly(Tile):
@@ -59,6 +65,7 @@ class CoastOnly(Tile):
     def set_unit(self, unit):
         self.parent.set_unit(unit)
         self.unit = unit
+        return self
 
 
 class MultiCoast(Tile):
@@ -70,20 +77,6 @@ class MultiCoast(Tile):
         self.adj = []
         self.nc = CoastOnly(name + " " + nc_name, self)
         self.sc = CoastOnly(name + " " + sc_name, self)
-
-
-class GameController:
-    armies = None
-    fleets = None
-    home_supply = None
-    owned_tiles = None
-
-    def __init__(self, a=None):
-        self.armies = []
-        self.fleets = []
-        self.home_supply = []
-        self.owned_tiles = []
-
 
 board = {}
 board["nao"] = nao = Tile("North Atlantic Ocean", False)
@@ -258,6 +251,48 @@ for sc in supply_centres:
 
 # for tile in board.values():
 # print("~"+str(tile) +":\nLand: "+str(tile.land_adj)+"\nSea: "+str(tile.sea_adj)+"\n")
+class Country(Enum):
+    AUSTRIA = "Austria"
+    ENGLAND = "England"
+    FRANCE = "France"
+    GERMANY = "Germany"
+    ITALY = "Italy"
+    RUSSIA = "Russia"
+    TURKEY = "Turkey"
+
+class Message(BaseModel):
+    to: list[Country]
+    body: str
+class Unit(Enum):
+    ARMY = 'a'
+    FLEET = 'f'
+class MoveType(Enum):
+    HOLD = "hold"
+    MOVE = "move"
+    SUPPORT = "support"
+    CONVOY = "convoy"
+class UnitLocation(BaseModel):
+    unit_type: Unit
+    location: str = Field(description = "Map tile this unit is located on. 3 letter string (except for split coasts)")
+class Order(BaseModel):
+    unit: UnitLocation
+    move_type: MoveType
+    target_start: str = Field("Map tile the unit targeted starts on. In the case of a move or hold, identical to the units location. Otherwise the tile on which the unit that 'unit' is targetting is located.")
+    target_end: str = Field("Ditto above but for end location instead.")
+
+class Discussion(BaseModel):
+    messages: list[Message]
+    turn_readyness: float = Field(description = "A confindence interval between 0 and 1 on how confident you are that you have finished discussion and are ready to move on")
+class Orders(BaseModel):
+    orders: list[Order]
+class Retreat(BaseModel):
+    unit: UnitLocation
+    destination: str  = Field(description = "Map tile this unit should retreat to.")
+class Build(BaseModel):
+    builds: list[UnitLocation] = Field(description = "List of new units to be built this turn.")
+class Disband(BaseModel):
+    disbands: list[UnitLocation] = Field(description = "List of locations of units to remove this turn.")
+
 
 class Voice():
     AVALIBLE = {
@@ -309,6 +344,8 @@ class Voice():
             name = name.split(" ")
             self.lang = name[0]
             self.tld = name[1]
+    def __repr__(self):
+        return '{"service": "'+self.service+'", "name": "'+self.name+'"}'
 
     def say(self, txt):
         if self.service == "streamElements":
@@ -333,87 +370,104 @@ class Voice():
             sleep(0.2)
 
 
-class Player:
+class Player(SimpleNamespace):
+    global board
+    armies = None
+    fleets = None
+    home_supply = None
+    owned_tiles = None
     country = ""
-    turn = 0
-    gc = None
-    submitted = False
+    message_queue = ""
+    orders = None
 
     def __init__(self, country):
         self.country = country
-        self.gc = GameController()
+        self.orders = []
+        
         match country:
             case "Austria":
-                self.gc.armies = [board["vie"], board["bud"]]
-                self.gc.fleets = [board["tri"]]
+                self.armies = [board["vie"].set_unit(("a",country)), board["bud"].set_unit(("a",country))]
+                self.fleets = [board["tri"].set_unit(("f",country))]
             case "France":
-                self.gc.armies = [board["par"], board["mar"]]
-                self.gc.fleets = [board["bre"]]
+                self.armies = [board["par"].set_unit(("a",country)), board["mar"].set_unit(("a",country))]
+                self.fleets = [board["bre"].set_unit(("f",country))]
             case "Germany":
-                self.gc.armies = [board["ber"], board["mun"]]
-                self.gc.fleets = [board["kie"], ]
+                self.armies = [board["ber"].set_unit(("a",country)), board["mun"].set_unit(("a",country))]
+                self.fleets = [board["kie"].set_unit(("f",country))]
             case "Italy":
-                self.gc.armies = [board["ven"], board["rom"]]
-                self.gc.fleets = [board["nap"]]
+                self.armies = [board["ven"].set_unit(("a",country)), board["rom"].set_unit(("a",country))]
+                self.fleets = [board["nap"].set_unit(("f",country))]
             case "Turkey":
-                self.gc.armies = [board["con"], board["smy"]]
-                self.gc.fleets = [board["ank"]]
+                self.armies = [board["con"].set_unit(("a",country)), board["smy"].set_unit(("a",country))]
+                self.fleets = [board["ank"].set_unit(("f",country))]
             case "Russia":
-                self.gc.armies = [board["mos"], board["war"]]
-                self.gc.fleets = [board["sev"], board["stp_sc"]]
+                self.armies = [board["mos"].set_unit(("a",country)), board["war"].set_unit(("a",country))]
+                self.fleets = [board["sev"].set_unit(("f",country)), board["stp_sc"].set_unit(("f",country))]
             case "England":
-                self.gc.armies = [board["lvp"]]
-                self.gc.fleets = [board["lon"], board["edi"]]
+                self.armies = [board["lvp"].set_unit(("a",country))]
+                self.fleets = [board["lon"].set_unit(("f",country)), board["edi"].set_unit(("f",country))]
             case _:
                 raise Exception("Invalid Country")
-        self.gc.home_supply = self.gc.armies + self.gc.fleets
+        self.home_supply = self.armies + self.fleets
         if country == "Russia":
-            self.gc.home_supply[3] = board["stp"]
-        self.gc.owned_tiles = self.gc.home_supply.copy()
-
-    def start_turn(self):
-        season = "Spring" if self.turn % 3 == 0 else "Autumn" if self.turn % 3 == 1 else "Winter"
-        return f"It is turn {self.turn + 1}; {season} {self.turn // 3 + 1901}\nThe current state of the board is…\n{board_state}.\n"
+            self.home_supply[3] = board["stp"]
+        self.owned_tiles = self.home_supply.copy()
 
     def prompt(self, message):
         raise NotImplementedError
+    def submitted(self):
+        return orders == ""
 
 
-NO_SUBMIT = "SYSTEM: You haven't submitted your moves for this turn! You need not do it immediately as disscussion is important, but the turn will not end until everyone has done so!|"
-YES_SUBMIT = "SYSTEM: You have submitted your orders for this turn!|"
+class Game(SimpleNamespace):
+    global board
+    VALID_TILES = "The codes for provinces used by the system are as follows: nao, nwg, bar, stp, stp_nc, stp_sc, fin, bot, swe, nwy, ska, nth, edi, cly, lvp, iri, yor, hel, den, bal, lvn, mos, war, pru, ber, kie, hol, bel, pic, bre, mao, eng, wal, lon, gas, par, bur, ruh, mun, boh, sil, gal, ukr, sev, rum, bud, vie, tyr, pie, mar, spa, spa_nc, spa_sc, por, wes, naf, lyo, tys, tun, tus, rom, nap, ion, apu, ven, adr, tri, alb, ser, gre, bul, bul_ec, bul_sc, bla, con, aeg, eas, smy, ank, arm, syr"
+    #board_state = "Austria:\na bud\nf tri\na vie\nEngland:\nf edi\nf lon\na lvp\nFrance:\nf bre\na mar\na par\nGermany:\na ber\nf kie\na mun\nItaly:\nf nap\na rom\na ven\nRussia:\na mos\nf sev\nf stp_sc\na war\nTurkey:\nf ank\na con\na smy"
+    turn = 0
+    players = {} # This is a class property not an object property, but since it doesn't make sense to have more than one game this is fine.
+    #supply_control = {"Austria": ["vie","bud","tri"], "England": ["edi","lon","lvp"], "France": ["bre","mar","par"], "Germany": ["ber","kie","mun"], "Italy": ["nap","rom","ven"], "Russia": ["mos","sev","stp","war"], "Turkey": ["ank","con","smy"], "Unoccupied": ["bel","hol","nwy","swe","spa","por","tun","rum","bul","gre","den"]}
+    supply_control = {"Austria": {"vie","bud","tri","ser"}, "England": {"edi","lon","lvp","hol"}, "France": {"bre","mar","par"}, "Germany": {"ber","kie","mun","den"}, "Italy": {"nap","rom","ven"}, "Russia": {"mos","sev","stp","war","swe"}, "Turkey": {"ank","con","smy","bul"}, "Unoccupied": {"bel","nwy","spa","por","tun","rum","gre"}}
 
+    def supply_control_str(self):
+        supply = "Control of supply centres is as follows: "
+        for country,centres in self.supply_control.items():
+            supply += country + ": "
+            for centre in centres:
+                supply += centre + ", "
+        return supply[:-2]
+    def board_state(self):
+        out = "The current state of the board is:\n"
+        for country in self.players.keys():
+            out += country + ":\n"
+            for army in self.players[country].armies:
+                out += "a " + army.abbr + "\n"
+            for fleet in self.players[country].fleets:
+                out += "f " + fleet.abbr + "\n"
+        return out
+        
+    def start_turn(self):
+        season = "Spring" if self.turn % 3 == 0 else "Autumn" if self.turn % 3 == 1 else "Winter"
+        return f"It is turn {self.turn + 1}; {season} {self.turn // 3 + 1901}\n{self.board_state()}\n" + ("Units on supply centres at this end of this turn will capture them.\n" if season == "Autumn" else "")
+    
+
+game = Game()
 
 class OpenAIPlayer(Player):
     global board
-    global board_state
-    SYSTEM_PROMPT = """You are playing a game of diplomacy as {country}. {personality} Along the way you'll have to talk to other players to progress. You must interact with the game through a series of commands.
-    Commands are issued by typing the name of the command followed by a colon (:) followed by the content of the command followed by a pipe (|). You should place a newline after this key punctuation to help readability.
-    The first command is mail, this will send a message to the listed countries allowing you to converse. For example, if you were a Russia player you could issue:
-    mail england, germany:
-    Greetings! I propose a DMZ in the Baltic Sea to ensure mutual security while I focus on southern expansion. Let’s discuss cooperation in the north.|
-    This would signal to those countries you were an ally.
-    The next command is submit. Submit is how you apply your orders. Bear in mind once every player has submitted the turn will end, so it is advisable to wait to submit until you have finished discussions.
-    Orders should be issued with either a for army or f for fleet then the location of the unit a dash (-) and the target location. we will use s for support h for hold and c for convoy. An army not listed in an order set is assumed to be holding.
-    The codes for provinces used by the system are as follows:
-    nao, nwg, bar, stp, stp_nc, stp_sc, fin, bot, swe, nwy, ska, nth, edi, cly, lvp, iri, yor, hel, den, bal, lvn, mos, war, pru, ber, kie, hol, bel, pic, bre, mao, eng, wal, lon, gas, par, bur, ruh, mun, boh, sil, gal, ukr, sev, rum, bud, vie, tyr, pie, mar, spa, spa_nc, spa_sc, por, wes, naf, lyo, tys, tun, tus, rom, nap, ion, apu, ven, adr, tri, alb, ser, gre, bul, bul_ec, bul_sc, bla, con, aeg, eas, smy, ank, arm, syr
-    An example turn one order for a Germany player would be:
-    submit:
-    a ber - kie
-    f kie - den
-    a mun s ven - tyr|
-    You may send multiple commands per turn. Please refrain from sending either speial characters in your responses except where required (:|)
-    RESPOND ONLY with commands in the provided format. They will be handled automatically and will fail to process if malformed. You are aiming to PLAY the game, do not echo the developer prompt.
-    """.replace("    ", "")
+    global game
+    message_queue = None
     history = None
 
     def __init__(self, country, api_key, model, api_url="", random_voice=True, personality=""):
         super().__init__(country)
+        self.message_queue = ""
+        self.history = []
 
-        history_file = open("history/" + country + ".txt", "r")
-        self.history = json.loads(history_file.read())
-        history_file.close()
+        #history_file = open("history/" + country + ".txt", "r")
+        #self.history = json.loads(history_file.read())
+        #history_file.close()
 
-        self.system_prompt = OpenAIPlayer.SYSTEM_PROMPT.format_map({"country": country, "personality": personality})
+        self.system_prompt = f"You are playing a game of diplomacy as {country}. {personality} "
         if api_url == "":
             self.client = OpenAI(api_key=api_key)
         else:
@@ -448,18 +502,54 @@ class OpenAIPlayer(Player):
         history_file.write(json.dumps(self.history))
         history_file.close()
 
-    def prompt(self, message):
-        message_list = [{"role": "developer",
-                         "content": self.system_prompt + "\n" + self.start_turn()}] + self.history + [
-                           {"role": "user", "content": message}]
-        response = self.client.chat.completions.create(model=self.model, messages=message_list)  # store=True,
-        print(response.choices[0].message.content)
-        global NO_SUBMIT, YES_SUBMIT
-        self.history += [{"role": "user", "content": message.replace(NO_SUBMIT, "").replace(YES_SUBMIT, "")},
-                         {"role": "assistant", "content": response.choices[0].message.content}]
-        # self.voice.say(response.choices[0].message.content)
-        # self.dump_history()
-        return response.choices[0].message.content
+    def prompt(self,text,response_format):   
+        completion = self.client.beta.chat.completions.parse(
+            model=self.model,
+            messages=[
+                {"role": "developer", "content": self.system_prompt}] +
+                self.history +
+                [{"role": "user", "content": text}],
+            response_format=response_format,
+        )
+        return completion.choices[0].message.parsed
+    
+    def discussion(self):
+        prompt_text = game.start_turn() + game.supply_control_str() + self.message_queue
+        discussion = self.prompt(prompt_text, Discussion)
+        return discussion
+
+    def orders(self):
+        prompt_text = game.start_turn() + game.supply_control_str() + game.VALID_TILES + "Please submit your orders for this turn."
+        return self.prompt(prompt_text, Orders)
+
+    def retreat(self,unit_type,tile):
+        adj = ""
+        for tile_i in (board[tile].land_adj if unit_type == "a" else board[tile].sea_adj):
+            adj += tile_i.abbr + ", "
+        adj = adj[:-2]
+        prompt_text = "Your " + ("army" if unit_type == "a" else "fleet") + " in " + tile + " has been dislodged, please move it to an adjacent tile " + "(" + adj + ")"
+        #print(prompt_text)
+        return self.prompt(prompt_text,Retreat)
+
+    def winter(self,num_units):
+        if num_units > 0:
+            free_tiles = 0
+            free_tiles_str = ""
+            for tile in self.home_supply:
+                if tile.unit is None and tile in self.owned_tiles:
+                    free_tiles_str += tile.abbr + ", "
+                    free_tiles += 1
+            if free_tiles == 0:
+                return
+            else:
+                free_tiles_str = home_supply_str[:-2]
+                builds = min(num_units,free_tiles)
+                prompt_text = game.start_turn() + "You've gained "+ str(builds) + " units. You may build them on any of the following tiles: " + free_tiles_str
+                return self.prompt(prompt_text,Build)
+        else:
+            num_units = -num_units
+            prompt_text = game.start_turn() + "You've lost "+str(num_units)+ " supply centres. Please select "+str(num_units)+" units to disband."
+            return self.prompt(prompt_text,Disband)
 
 
 def backstab_import():
@@ -483,124 +573,28 @@ def backstab_import():
     board_state = boardstate + "|"
 
 
-def process_message_text(msg, sender, message_queue, orders):
-    commands = []
-    for i in range(len(msg)):
-        while msg[i] != "" and msg[i][0] == "\n":
-            msg[i] = msg[i][1:]
-        if msg[i] == "":
-            continue
-        commands.append(msg[i].split(":"))
-
-    for command in commands:
-        # print(command)
-        if command == [""]:
-            continue
-        elif command[0][:4] == "mail":
-            mailto = command[0][5:].split(", ")
-            for countryi in mailto:
-                cc = []
-                for countryj in mailto:
-                    if countryi != countryj:
-                        cc.append(countryj)
-                message = "From " + sender
-                if len(cc) > 0:
-                    message += " cc "
-                    for countryj in cc:
-                        if countryj in message_queue.keys():
-                            message += countryj + ", "
-                    message = message[:-2]
-                message += ":" + command[1] + "|\n"
-                try:
-                    message_queue[countryi.title()] += message
-                except KeyError:
-                    message_queue[
-                        sender] += "SYSTEM: Your previous message was not sent to " + countryi + \
-                                   "as it doesn't exist. Remember you are playing the board game Diplomay!!|"
-
-        elif command[0][:6] == "submit":
-            print(command)
-            global board
-            verbose_orders = ""
-            for move in command[1].split("\n"):
-                if len(move) > 0:
-                    verbose_orders += "\t"
-                for action in move.split(" "):
-                    if action == "":
-                        continue
-                    elif action == "a":
-                        verbose_orders += "Army "
-                    elif action == "f":
-                        verbose_orders += "Fleet "
-                    elif action == "s":
-                        verbose_orders += "supports "
-                    elif action == "c":
-                        verbose_orders += "convoys "
-                    elif action == "h":
-                        verbose_orders += "holds"
-                    elif action == "-":
-                        verbose_orders += "-> "
-                    else:
-                        verbose_orders += str(board[action]) + " "
-                if len(move) > 0:
-                    verbose_orders = verbose_orders[:-1] + "\n"
-            # print("Orders from: "+sender + "\n"+verbose_orders)
-            orders[sender] = verbose_orders
-            # testout = command[0] + command[1]
-            # print(testout + "\n---")
-        else:
-            print("malformed command: " + str(command))
-            message_queue[sender] += "SYSTEM: One of your previous commands was malformed and has not been processed."
-
-
-def process_message(player, message_queue, orders):
-    global NO_SUBMIT
-    sender = player.country
-    if message_queue[sender] == "":
-        if orders[sender] != "":
-            print("Skipping " + sender + "'s turn. They've submitted and have an empty inbox.")
-            return
-        else:
-            message_queue[sender] = NO_SUBMIT
-    msg = player.prompt(message_queue[sender]).split("|")
-    process_message_text(msg, sender, message_queue, orders)
-    message_queue[sender] = ""
-    if orders[sender] != "":
-        player.sumbitted = True
-
-
-def turn_finished(orders):
-    for order in orders.values():
-        if order == "":
-            return False
-    return True
-
-
-board_state = "Austria,\na bud\nf tri\na vie\nEngland,\nf edi\nf lon\na lvp\nFrance,\nf bre\na mar\na par\nGermany,\na ber\nf kie\na mun\nItaly,\nf nap\na rom\na ven\nRussia,\na mos\nf sev\nf stp_sc\na war\nTurkey,\nf ank\na con\na smy|"
-message_queue = {"Austria": "", "England": "", "France": "", "Germany": "", "Italy": "", "Russia": "", "Turkey": ""}
-orders = message_queue.copy()
 
 OPENAI_KEY = environ["OPENAI_API_KEY"]
 GEMINI_KEY = environ["GEMINI_API_KEY"]
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
-players = [
-    OpenAIPlayer("England", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False),
-    OpenAIPlayer("Austria", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False),
-    OpenAIPlayer("Italy", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False),
-    OpenAIPlayer("Turkey", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False),
-    OpenAIPlayer("Germany", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False),
-    OpenAIPlayer("Russia", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False),
-    OpenAIPlayer("France", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False),
-]
+game.players = {
+    "England": OpenAIPlayer("England", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False),
+    "Austria": OpenAIPlayer("Austria", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False),
+    "Italy": OpenAIPlayer("Italy", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False),
+    "Turkey": OpenAIPlayer("Turkey", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False),
+    "Germany": OpenAIPlayer("Germany", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False),
+    "Russia": OpenAIPlayer("Russia", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False),
+    "France": OpenAIPlayer("France", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False),
+}
 
-fo = open("history/_save.txt")
+'''fo = open("history/_save.txt")
 save_file = fo.read().split("|")
 fo.close()
 if save_file != "":  # TODO work out if player has submitted orders
-    for player in players:
+    for player in game.players.values():
         player.turn = int(save_file[0])
-    board_state = save_file[1]
+    game.board_state = save_file[1]
     saved_orders = save_file[2:]
     for saved_order in saved_orders:
         saved_order = saved_order.split(",\n")
@@ -609,19 +603,39 @@ if save_file != "":  # TODO work out if player has submitted orders
             saved_order[1] = saved_order[1].replace("\t", "")
             orders[saved_order[0]] = saved_order[1]
         except IndexError:
-            pass
+            pass'''
 
 '''for p in players:
     print(p.country + ",",end="\n")
-    for a in p.gc.armies:
+    for a in p.armies:
         print("a " + a.abbr,end="\n")
-    for f in p.gc.fleets:
+    for f in p.fleets:
         print("f " + f.abbr,end="\n")'''
 
+def process_discussion(player,discussion):
+    for entry in discussion.messages:
+        mailto = entry.to
+        body = entry.body
+        for countryi in mailto:
+                cc = []
+                for countryj in mailto:
+                    if countryi != countryj:
+                        cc.append(countryj)
+                message = "From " + player.country
+                if len(cc) > 0:
+                    message += " cc "
+                    for countryj in cc:
+                        if countryj in message_queue.keys():
+                            message += countryj.value + ", "
+                    message = message[:-2]
+                message += ":" + body + "|\n"
+                game.countries[countryi.value] += message
+
 i = 0
+j = 1
 while not turn_finished(orders):
     print("------------------------" * 2)
-    print(players[i].country + "'s Turn (Queue Length: " + str(len(message_queue[players[i].country])) + ")")
+    print(players[i].country + "'s Turn (Queue Length: " + str(len(players[i].message_queue)) + ")")
     process_message(players[i], message_queue, orders)
     sleep(4)
     i = (i + 1) % 7
@@ -670,8 +684,3 @@ for country, order in orders.items():
     fo.write(country + "," + order + "|")
 for player in players:
     player.dump_history()
-#Turn one of discussion, no orders will be submitted
-#0 out of 7 players have submitted orders.
-#You have not submitted orders. x of 7 players have.
-#x out of 7 players, including you, have submitted orders.
-#All Players have submitted. Orders are as follows:

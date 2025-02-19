@@ -15,31 +15,22 @@ countries = ["England","Austria","Italy","Turkey","Germany","Russia","France"]
 personalities = [
     ["chaotic","lawful"],["evil","moral"],["friendly"],["devious"],["trustworthy","untrustworthy"],
     ["secretly in love with the "+random.choice(countries) + " player", "despises the "+random.choice(countries) + " player"],
-    ["impatient"],["quirky"],["distracted"],["strange"],["unhinged"],["a total bro"],["drunk"],["whimsical"],["massively overuses emoji"],["extremely excitable","completely chill"],
+    ["impatient","patient"],["quirky"],["distracted"],["strange"],["unhinged"],["a total bro"],["drunk"],["whimsical"],["massively overuses emoji"],["extremely excitable","completely chill"],
     ["can't use the letter " + random.choice(["a","e","i","o","u","s","t"]) + " while messaging other players"],["very occasionally asks one question that's way too personal"],
-    ["efficient"],["cold"],["contrarian"],[""],["broken"],["caveman"],["ancient"],["fae"],["addicted to Twitch slang"],["constatly lie about other player's moves"]
+    ["efficient"],["cold","warm"],["contrarian"],["broken"],["caveman"],["ancient","childish"],["fae"],["addicted to Twitch slang"],["constatly lie about other player's moves"],["1920s mobster boss"],["massive risk taker"],["Must speak like a dr, suess book"],["neurotic"],["Finance speculator: loves investing and crypto and gives unsolicited advice"],["surfer dude"],["Gleeful","Gloomy"],["would do any bet"],["keeps making references to stories from their childhood"],["Goofball"],["Steadfast","Paranoid"],["Hot-Headed"],["Genius"],["Creative"],["Self-Assured","Insecure"],["Ambitious"]
     ]
 
 #Brings everything back to something from childhood
-#neurotic
-#Interested in crypto / stocks tries to sell
 #believes they're in a simulation.
-#tinfoil hat wearer: believes everything is a conspiracy
 #would do any bet
-#risk taker
-#mobster boss
-#surfer dude
-#Must speak like a dr, suess book
-
-#maybe split into traits like "evil" and speaking restrictions - take only one of the latter?
 
 print("There are a total of "+ str(len(personalities)) + " traits.")
 traits = ""
-for i in range(3):
+for i in range(5):
     choice = random.choice(personalities)
     traits += random.choice(choice) + ", "
     personalities.remove(choice)
-traits  += "1920s mobster boss"
+#traits  += "keeps making references to stories from their childhood"
 print(traits)
 response = client.chat.completions.create(
     model="gemini-2.0-flash",
@@ -50,22 +41,6 @@ response = client.chat.completions.create(
 )
 personality = response.choices[0].message.content
 print(personality)
-
-class CalendarEvent(BaseModel):
-    name: str
-    date: str
-    participants: list[str]
-
-'''completion = client.beta.chat.completions.parse(
-    model="gemini-2.0-flash",
-    messages=[
-        {"role": "system", "content": "Extract the event information."},
-        {"role": "user", "content": "Alice and Bob are going to a science fair on Friday."},
-    ],
-    response_format=CalendarEvent,
-)
-event = completion.choices[0].message.parsed'''
-#This does work with gemini. Interesting....
 
 
 class Country(Enum):
@@ -90,7 +65,7 @@ class MoveType(Enum):
     CONVOY = "convoy"
 class UnitLocation(BaseModel):
     unit_type: Unit
-    location: str = Field(description = "Map tile this unit is located on. 3 letter string (except for north and south coasts)")
+    location: str = Field(description = "Map tile this unit is located on. 3 letter string (except for split coasts)")
 class Order(BaseModel):
     unit: UnitLocation
     move_type: MoveType
@@ -99,16 +74,17 @@ class Order(BaseModel):
 
 class Retreat(BaseModel):
     unit: UnitLocation
-    destination: str  = Field(description = "Map tile this unit should retreat to. 3 letter string (except for north and south coasts)")
+    destination: str  = Field(description = "Map tile this unit should retreat to. 3 letter string (except for split coasts)")
 class Build(BaseModel):
     builds: list[UnitLocation] = Field(description = "List of new units to be built this turn.")
 class Disband(BaseModel):
     disbands: list[UnitLocation] = Field(description = "List of locations of units to remove this turn.")
 
-class DiplomacyResponse(BaseModel):
+class Discussion(BaseModel):
     messages: list[Message]
     #submit: bool Field(description = "Whether or not to submit orders. True if you have finished all the turn's discussions, False otherwise.")
-    turn_readyness: float = Field(description = "A confindence interval between 0 and 1 on how confident you are in the moves you are about to make")
+    turn_readyness: float = Field(description = "A confindence interval between 0 and 1 on how confident you are that you have finished discussion and are ready to move on")
+class Orders(BaseModel):
     orders: list[Order]
     
 completion = client.beta.chat.completions.parse(
@@ -118,7 +94,7 @@ completion = client.beta.chat.completions.parse(
         {"role": "system", "content": "You are playing a game of diplomacy as France." + personality},
         {"role": "user", "content": "It is turn 2; Fall 1901\n The Current State of the board is as follows...Austria,\na bud\nf tri\na vie\nEngland,\nf edi\nf lon\na lvp\nFrance,\nf bre\na mar\na par\nGermany,\na ber\nf kie\na mun\nItaly,\nf nap\na rom\na ven\nRussia,\na mos\nf sev\nf stp_sc\na war\nTurkey,\nf ank\na con\na smy|"},
     ],
-    response_format=DiplomacyResponse,
+    response_format=Discussion,
 )
 x = completion.choices[0].message.parsed
 print(x)
