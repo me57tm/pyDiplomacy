@@ -11,6 +11,17 @@ OPENAI_KEY = environ["GEMINI_API_KEY"]
 
 client = OpenAI(api_key=OPENAI_KEY,base_url="https://generativelanguage.googleapis.com/v1beta/openai/")
 countries = ["England","Austria","Italy","Turkey","Germany","Russia","France"]
+class YN(Enum):
+     Y = "yes"
+     N = "no"
+class YesNo(BaseModel):
+    yn: YN
+
+print(client.beta.chat.completions.parse(
+    model="gemini-2.0-flash",
+    messages=[{"role": "user", "content": "yes or no"}],
+     response_format=YesNo,
+    ))
 
 personalities = [
     ["chaotic","lawful"],["evil","moral"],["friendly"],["devious"],["trustworthy","untrustworthy"],
