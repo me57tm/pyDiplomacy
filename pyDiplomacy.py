@@ -6,7 +6,7 @@ import random
 import json
 from enum import Enum
 from pygame import mixer
-from time import sleep
+import time
 from os import environ
 from openai import OpenAI
 from pydantic import BaseModel, Field
@@ -35,7 +35,8 @@ class Tile():
 
     def __repr__(self):
         return self.abbr
-    def __eq__(self,t):
+
+    def __eq__(self, t):
         return self.abbr == t.abbr
 
     def set_adj(self, land_tiles=[], sea_tiles=[]):
@@ -77,6 +78,7 @@ class MultiCoast(Tile):
         self.adj = []
         self.nc = CoastOnly(name + " " + nc_name, self)
         self.sc = CoastOnly(name + " " + sc_name, self)
+
 
 board = {}
 board["nao"] = nao = Tile("North Atlantic Ocean", False)
@@ -259,123 +261,129 @@ class Country(Enum):
     ITALY = "Italy"
     RUSSIA = "Russia"
     TURKEY = "Turkey"
+
+
 class YN(Enum):
-     Y = "yes"
-     N = "no"
+    Y = "yes"
+    N = "no"
+
+
 class Unit(Enum):
     ARMY = 'a'
     FLEET = 'f'
+
+
 class MoveType(Enum):
     HOLD = "hold"
     MOVE = "move"
     SUPPORT = "support"
     CONVOY = "convoy"
+
+
 class YesNo(BaseModel):
     yn: YN
+
+
 class Message(BaseModel):
     to: list[Country]
     body: str
+
+
 class UnitLocation(BaseModel):
     utype: Unit
-    location: str = Field(description = "Map tile this unit is located on. 3 letter string (except for split coasts)")
+    location: str = Field(description="Map tile this unit is located on. 3 letter string (except for split coasts)")
+
+
+class Order(BaseModel):
+    unit: UnitLocation
+    mtype: MoveType
+    # Having more than one unitlocation causes a crash that doesn't seem possible to debug
+    target_start: str = Field(
+        "Map tile the unit targeted starts on. In the case of a move or hold, identical to the units location. Otherwise the tile on which the unit that 'unit' is targetting is located.")
+    target_end: str = Field(
+        "The tile the unit should end up on for a move or the tile the target should end up on for a support or convoy. Same as target start for a support hold. Unused for simple holds.")
+
+
+class InvalidOrder(BaseModel):
+    reason: str
+
+    def check_validity(self, country):
+        return False, self.reason
+    def __str__(self):
+        return "Malformed Order"
+
+
 class StrictOrder(BaseModel):
+    # A more easy to process format of order. Doesn't guaruntee validity, but does guaruntee that all tiles referenced exist.
     mtype: MoveType
     unit: UnitLocation
     target_start: UnitLocation | None
     target_end: str | None
-class InvalidOrder:
-    reason: str
-    def check_validity(self,country):
-        return False, self.reason
-    
-    
-class Order(BaseModel):
-    unit: UnitLocation
-    mtype: MoveType
-    #Having more than one unitlocation causes a crash that doesn't seem possible to debug
-    target_start: str = Field("Map tile the unit targeted starts on. In the case of a move or hold, identical to the units location. Otherwise the tile on which the unit that 'unit' is targetting is located.")
-    target_end: str = Field("The tile the unit should end up on for a move or the tile the target should end up on for a support or convoy. Same as target start for a support hold. Unused for simple holds.")
 
-    def check_validity(self,country):
-        #This doesn't guaruntee that the move is 100% possible, just performs some basic sanity checks
+    def check_validity(self, country):
+        # This doesn't guaruntee that the move is 100% possible, just performs some basic sanity checks
         def a_f(x):
             return "a fleet " if x == "f" else "an army "
-        
-        global board
-        #Check all used tiles in this move actually exist.
-        if self.unit.location not in board.keys():
-             return False, self.unit.location + " is not a recognised tile, please refer to the list provided."
-        if self.mtype != MoveType.HOLD:
-            if self.target_end not in board.keys():
-                return False, self.target_end + " is not a recognised tile, please refer to the list provided."
-            if self.mtype != MoveType.MOVE:
-                if self.target_start not in board.keys():
-                    return False, self.target_start + " is not a recognised tile, please refer to the list provided."
-        try:
-            tile_self = board[self.unit.location]
+
+        tile_self = board[self.unit.location]
+        if self.target_start is not None:
+            tile_target = board[self.target_start.location]
+        if self.target_end is not None:
             tile_end = board[self.target_end]
-            tile_target = board[self.target_start]
-        except Exception as e:
-            #tile_target = board[self.target_start]
-            #If one of these fails we've already checked it isn't needed so it's no big deal.
-            print(e)
 
-
-        #Check selected units actually exist.
-
-        if tile_self.unit == None:
-            return False, "There is no unit present on tile " + self.unit.location + "."
         if tile_self.unit[1] != country:
-             return False, "The selected unit on " + self.unit.location + "is foriegn. You may only order your own units."
+            return False, "The selected unit on " + self.unit.location + "is foriegn. You may only order your own units."
         if tile_self.unit[0] != self.unit.utype.value:
-            return False, "The selected unit on tile " + self.unit.location + " is " + a_f(tile_self.unit[0]) + "not " + a_f(self.unit.utype.value)
+            return False, "The selected unit on tile " + self.unit.location + " is " + a_f(
+                tile_self.unit[0]) + "not " + a_f(self.unit.utype.value)
 
         if self.mtype == MoveType.HOLD:
             return True, "Hold is valid"
 
         if self.mtype != MoveType.MOVE:
-            if tile_target.unit == None:
-                return False, "There is no unit present on targetted tile at " + self.target_start + "."
-            if self.target_start == self.unit.location:
-                 return False, "A unit may not support or convoy itself."
+            if self.target_start.location == self.unit.location:
+                return False, "A unit may not support itself."
         if self.mtype == MoveType.CONVOY and tile_target.unit[0] == "f":
             return False, "You may only convoy armies, not fleets."
 
         self_adjacent = []
-        if self.unit.utype == "f":
+        if self.unit.utype == Unit.FLEET:
             self_adjacent = tile_self.sea_adj
         else:
-            self_adjacent = tile_self.sea_adj
+            self_adjacent = tile_self.land_adj
         if self.mtype == MoveType.MOVE:
             if tile_end not in self_adjacent:
-                return False, self.unit.location + " and " + self.target_end + " are not adjacent."
+                return False, self.unit.location + " and " + self.target_end + " are not adjacent. " +self.unit.location + " is adjacent to " + str(board[self.unit.location].land_adj) + " by land and " + str(board[self.unit.location].sea_adj) + " by sea."
             else:
                 return True, "Move is valid."
-        
-        target_adjacent = [] 
+
         if tile_target.unit[0] == "f":
             target_adjacent = tile_target.sea_adj
         else:
             target_adjacent = tile_target.land_adj
-        supportable_adjacent = [] # Checks if a unit can actually support the target eg an army can't wade across an ocean to support a fleet
-        if  self.unit.utype == "f":
+        supportable_adjacent = []  # Checks if a unit can actually support the target eg an army can't wade across an ocean to support a fleet
+        if self.unit.utype == Unit.FLEET:
             supportable_adjacent = tile_target.sea_adj
         else:
             supportable_adjacent = tile_target.land_adj
-        
+
         if self.mtype == MoveType.SUPPORT:
+            if self.target_start.location == self.unit.location:
+                return False, "A unit may not support itself."
             if tile_target not in self_adjacent:
-                return False, self.unit.location + " and " + self.target_start + " are not adjacent."
-            elif self.target_start == self.target_end:
+                return False, self.unit.location + " and " + self.target_start.location + " are not adjacent. " +  +self.unit.location + " is adjacent to " + str(board[self.unit.location].land_adj) + " by land and " + str(board[self.unit.location].sea_adj) + " by sea."
+            elif self.target_start.location == self.target_end:
                 return True, "Support Hold is valid."
-            elif self.tile_end not in self.target_adjacent:
-                return False, self.target_start + " and " + self.target_end + " are not adjacent."
-            elif self.tile_end not in self.supportable_adjacent:
-                return False, a_j(self.unit.utype) + " is unable to support " + self.target_start + " to " + self.target_end + " as " + a_j(self.unit.utype) + " cannot move to that tile."
+            elif tile_end not in self.target_adjacent:
+                return False, self.target_start.location + " and " + self.target_end + " are not adjacent. "  +self.target_start.location + " is adjacent to " + str(board[self.target_start.location].land_adj) + " by land and " + str(board[self.target_start.location].sea_adj) + " by sea."
+            elif tile_end not in self.supportable_adjacent:
+                return False, a_f(
+                    self.unit.utype) + " is unable to support " + self.target_start.location + " to " + self.target_end + " as " + a_f(
+                    self.unit.utype) + " cannot move to that tile."
             else:
                 return True, "Support is valid."
 
-        def find_convoy_tile(target,start):
+        def find_convoy_tile(target, start):
             valid = [start.adjacent]
             checked = []
             while len(valid) > 0:
@@ -388,14 +396,15 @@ class Order(BaseModel):
                     checked.append(tile)
                 valid = new_valid
             return False
-        #Move Type is Convoy
+
+        # Move Type is Convoy
         if tile_target not in self_adjacent:
-            if not find_convoy_tile(tile_target,tile_self):
-                return False, self.unit.location + " and " + self.target_start + " are not adjacent, and there isn't a path of fleets between them."
+            if not find_convoy_tile(tile_target, tile_self):
+                return False, self.unit.location + " and " + self.target_start.location + " are not adjacent, and there isn't a path of fleets between them."
         if tile_end not in self_adjacent:
-            if not find_convoy_tile(tile_end,tile_self):
-                return False, self.unit.location + " and " + self.target_start + " are not adjacent, and there isn't a path of fleets between them."
-        return True, "Convoy is valid." 
+            if not find_convoy_tile(tile_end, tile_self):
+                return False, self.unit.location + " and " + self.target_start.location + " are not adjacent, and there isn't a path of fleets between them."
+        return True, "Convoy is valid."
 
     def __str__(self):
         match self.mtype:
@@ -404,22 +413,95 @@ class Order(BaseModel):
             case MoveType.MOVE:
                 return self.unit.utype.value + " " + self.unit.location + " - " + self.target_end
             case MoveType.SUPPORT:
-                return self.unit.utype.value + " " + self.unit.location + " supports " + self.target_start + " - " + self.target_end
+                return self.unit.utype.value + " " + self.unit.location + " supports " + self.target_start.utype.value + " " + self.target_start.location + " - " + self.target_end
             case MoveType.CONVOY:
-                return self.unit.utype.value + " " + self.unit.location + " convoys " + self.target_start + " - " + self.target_end
+                return self.unit.utype.value + " " + self.unit.location + " convoys a " + self.target_start.location + " - " + self.target_end
+
+
+def convert_order_to_strict(order):
+    global board
+
+    def try_simple_fixes(tile_code):
+        tile_code = tile_code.lower()
+        if tile_code in board.keys():
+            return tile_code
+        if tile_code[2:] in board.keys():
+            return tile_code[2:]
+        # Nuclear option
+        tile_code = tile_code.title()
+        for tile in board.values():
+            if tile.name == tile_code:
+                return tile_code.abbr
+        return None
+
+    if order.unit.location not in board.keys():
+        fix = try_simple_fixes(order.unit.location)
+        if fix is None:
+            return InvalidOrder(
+                reason=order.unit.location + " is not a recognised tile, please refer to the list provided.")
+        else:
+            order.unit.location = fix
+    if board[order.unit.location].unit is None:
+        return InvalidOrder(reason="There is no unit present on tile " + order.unit.location + ".")
+    if order.mtype == MoveType.HOLD:
+        return StrictOrder(
+            mtype=MoveType.HOLD,
+            unit=order.unit,
+            target_start=None,
+            target_end=None,
+        )
+    if order.target_end not in board.keys():
+        fix = try_simple_fixes(order.target_end)
+        if fix is None:
+            return InvalidOrder(
+                reason=order.target_end + " is not a recognised tile, please refer to the list provided.")
+        else:
+            order.target_end = fix
+    if order.mtype == MoveType.MOVE:
+        return StrictOrder(
+            mtype=MoveType.MOVE,
+            unit=order.unit,
+            target_start=None,
+            target_end=order.target_end,
+        )
+    if order.target_start not in board.keys():
+        fix = try_simple_fixes(order.target_start)
+        if fix is None:
+            return InvalidOrder(
+                reason=order.target_start + " is not a recognised tile, please refer to the list provided.")
+        else:
+            order.target_start = fix
+    if board[order.target_start].unit is None:
+        return InvalidOrder(reason="There is no unit present on tile " + order.target_start + ".")
+    return StrictOrder(
+        mtype=order.mtype,
+        unit=order.unit,
+        target_start=UnitLocation(utype=board[order.target_start].unit[0], location=order.target_start),
+        target_end=order.target_end,
+    )
+
 
 class Discussion(BaseModel):
     messages: list[Message]
-    turn_readiness: float = Field(description = "A confidence interval between 0 and 1 on how confident you are that you have finished discussion and are ready to move on")
+    turn_readiness: float = Field(
+        description="A confidence interval between 0 and 1 on how confident you are that you have finished discussion and are ready to move on")
+
+
 class Orders(BaseModel):
-    orders: list[Order] = Field(description = "An order for each of your units.")
+    orders: list[Order] = Field(description="An order for each of your units.")
+
+
 class Retreat(BaseModel):
     unit: UnitLocation
-    destination: str  = Field(description = "Map tile this unit should retreat to.")
+    destination: str = Field(description="Map tile this unit should retreat to.")
+
+
 class Build(BaseModel):
-    builds: list[UnitLocation] = Field(description = "List of new units to be built this turn.")
+    builds: list[UnitLocation] = Field(description="List of new units to be built this turn.")
+
+
 class Disband(BaseModel):
-    disbands: list[UnitLocation] = Field(description = "List of locations of units to remove this turn.")
+    disbands: list[UnitLocation] = Field(description="List of locations of units to remove this turn.")
 
 
 class Voice:
@@ -472,8 +554,9 @@ class Voice:
             name = name.split(" ")
             self.lang = name[0]
             self.tld = name[1]
+
     def __repr__(self):
-        return '{"service": "'+self.service+'", "name": "'+self.name+'"}'
+        return '{"service": "' + self.service + '", "name": "' + self.name + '"}'
 
     def say(self, txt):
         if self.service == "streamElements":
@@ -511,29 +594,29 @@ class Player(SimpleNamespace):
     def __init__(self, country):
         self.country = country
         self.orders = []
-        
+
         match country:
             case "Austria":
-                self.armies = [board["vie"].set_unit(("a",country)), board["bud"].set_unit(("a",country))]
-                self.fleets = [board["tri"].set_unit(("f",country))]
+                self.armies = [board["vie"].set_unit(("a", country)), board["bud"].set_unit(("a", country))]
+                self.fleets = [board["tri"].set_unit(("f", country))]
             case "France":
-                self.armies = [board["par"].set_unit(("a",country)), board["mar"].set_unit(("a",country))]
-                self.fleets = [board["bre"].set_unit(("f",country))]
+                self.armies = [board["par"].set_unit(("a", country)), board["mar"].set_unit(("a", country))]
+                self.fleets = [board["bre"].set_unit(("f", country))]
             case "Germany":
-                self.armies = [board["ber"].set_unit(("a",country)), board["mun"].set_unit(("a",country))]
-                self.fleets = [board["kie"].set_unit(("f",country))]
+                self.armies = [board["ber"].set_unit(("a", country)), board["mun"].set_unit(("a", country))]
+                self.fleets = [board["kie"].set_unit(("f", country))]
             case "Italy":
-                self.armies = [board["ven"].set_unit(("a",country)), board["rom"].set_unit(("a",country))]
-                self.fleets = [board["nap"].set_unit(("f",country))]
+                self.armies = [board["ven"].set_unit(("a", country)), board["rom"].set_unit(("a", country))]
+                self.fleets = [board["nap"].set_unit(("f", country))]
             case "Turkey":
-                self.armies = [board["con"].set_unit(("a",country)), board["smy"].set_unit(("a",country))]
-                self.fleets = [board["ank"].set_unit(("f",country))]
+                self.armies = [board["con"].set_unit(("a", country)), board["smy"].set_unit(("a", country))]
+                self.fleets = [board["ank"].set_unit(("f", country))]
             case "Russia":
-                self.armies = [board["mos"].set_unit(("a",country)), board["war"].set_unit(("a",country))]
-                self.fleets = [board["sev"].set_unit(("f",country)), board["stp_sc"].set_unit(("f",country))]
+                self.armies = [board["mos"].set_unit(("a", country)), board["war"].set_unit(("a", country))]
+                self.fleets = [board["sev"].set_unit(("f", country)), board["stp_sc"].set_unit(("f", country))]
             case "England":
-                self.armies = [board["lvp"].set_unit(("a",country))]
-                self.fleets = [board["lon"].set_unit(("f",country)), board["edi"].set_unit(("f",country))]
+                self.armies = [board["lvp"].set_unit(("a", country))]
+                self.fleets = [board["lon"].set_unit(("f", country)), board["edi"].set_unit(("f", country))]
             case _:
                 raise Exception("Invalid Country")
         self.home_supply = self.armies + self.fleets
@@ -543,6 +626,7 @@ class Player(SimpleNamespace):
 
     def prompt(self, message):
         raise NotImplementedError
+
     def submitted(self):
         return orders == ""
 
@@ -550,19 +634,24 @@ class Player(SimpleNamespace):
 class Game(SimpleNamespace):
     global board
     VALID_TILES = "The codes for provinces used by the system are as follows: nao, nwg, bar, stp, stp_nc, stp_sc, fin, bot, swe, nwy, ska, nth, edi, cly, lvp, iri, yor, hel, den, bal, lvn, mos, war, pru, ber, kie, hol, bel, pic, bre, mao, eng, wal, lon, gas, par, bur, ruh, mun, boh, sil, gal, ukr, sev, rum, bud, vie, tyr, pie, mar, spa, spa_nc, spa_sc, por, wes, naf, lyo, tys, tun, tus, rom, nap, ion, apu, ven, adr, tri, alb, ser, gre, bul, bul_ec, bul_sc, bla, con, aeg, eas, smy, ank, arm, syr"
-    #board_state = "Austria:\na bud\nf tri\na vie\nEngland:\nf edi\nf lon\na lvp\nFrance:\nf bre\na mar\na par\nGermany:\na ber\nf kie\na mun\nItaly:\nf nap\na rom\na ven\nRussia:\na mos\nf sev\nf stp_sc\na war\nTurkey:\nf ank\na con\na smy"
+    # board_state = "Austria:\na bud\nf tri\na vie\nEngland:\nf edi\nf lon\na lvp\nFrance:\nf bre\na mar\na par\nGermany:\na ber\nf kie\na mun\nItaly:\nf nap\na rom\na ven\nRussia:\na mos\nf sev\nf stp_sc\na war\nTurkey:\nf ank\na con\na smy"
     turn = 0
-    players = {} # This is a class property not an object property, but since it doesn't make sense to have more than one game this is fine.
-    #supply_control = {"Austria": ["vie","bud","tri"], "England": ["edi","lon","lvp"], "France": ["bre","mar","par"], "Germany": ["ber","kie","mun"], "Italy": ["nap","rom","ven"], "Russia": ["mos","sev","stp","war"], "Turkey": ["ank","con","smy"], "Unoccupied": ["bel","hol","nwy","swe","spa","por","tun","rum","bul","gre","den"]}
-    supply_control = {"Austria": {"vie","bud","tri","ser"}, "England": {"edi","lon","lvp","hol"}, "France": {"bre","mar","par"}, "Germany": {"ber","kie","mun","den"}, "Italy": {"nap","rom","ven"}, "Russia": {"mos","sev","stp","war","swe"}, "Turkey": {"ank","con","smy","bul"}, "Unoccupied": {"bel","nwy","spa","por","tun","rum","gre"}}
+    players = {}  # This is a class property not an object property, but since it doesn't make sense to have more than one game this is fine.
+    # supply_control = {"Austria": ["vie","bud","tri"], "England": ["edi","lon","lvp"], "France": ["bre","mar","par"], "Germany": ["ber","kie","mun"], "Italy": ["nap","rom","ven"], "Russia": ["mos","sev","stp","war"], "Turkey": ["ank","con","smy"], "Unoccupied": ["bel","hol","nwy","swe","spa","por","tun","rum","bul","gre","den"]}
+    supply_control = {"Austria": {"vie", "bud", "tri", "ser"}, "England": {"edi", "lon", "lvp", "hol"},
+                      "France": {"bre", "mar", "par"}, "Germany": {"ber", "kie", "mun", "den"},
+                      "Italy": {"nap", "rom", "ven"}, "Russia": {"mos", "sev", "stp", "war", "swe"},
+                      "Turkey": {"ank", "con", "smy", "bul"},
+                      "Unoccupied": {"bel", "nwy", "spa", "por", "tun", "rum", "gre"}}
 
     def supply_control_str(self):
         supply = "Control of supply centres is as follows: "
-        for country,centres in self.supply_control.items():
+        for country, centres in self.supply_control.items():
             supply += country + ": "
             for centre in centres:
                 supply += centre + ", "
         return supply[:-2]
+
     def board_state(self):
         out = "The current state of the board is:\n"
         for country in self.players.keys():
@@ -572,28 +661,31 @@ class Game(SimpleNamespace):
             for fleet in self.players[country].fleets:
                 out += "f " + fleet.abbr + "\n"
         return out
-        
+
     def start_turn(self):
         season = "Spring" if self.turn % 3 == 0 else "Autumn" if self.turn % 3 == 1 else "Winter"
-        return f"It is turn {self.turn + 1}; {season} {self.turn // 3 + 1901}\n{self.board_state()}\n" + ("Units on supply centres at this end of this turn will capture them.\n" if season == "Autumn" else "")
-    
+        return f"It is turn {self.turn + 1}; {season} {self.turn // 3 + 1901}\n{self.board_state()}\n" + (
+            "Units on supply centres at this end of this turn will capture them.\n" if season == "Autumn" else "")
+
 
 game = Game()
+
 
 class OpenAIPlayer(Player):
     global board
     global game
     message_queue = None
     history = None
+    last_polled = time.time()
 
     def __init__(self, country, api_key, model, api_url="", random_voice=True, personality=""):
         super().__init__(country)
         self.message_queue = ""
         self.history = []
 
-        #history_file = open("history/" + country + ".txt", "r")
-        #self.history = json.loads(history_file.read())
-        #history_file.close()
+        # history_file = open("history/" + country + ".txt", "r")
+        # self.history = json.loads(history_file.read())
+        # history_file.close()
 
         self.system_prompt = f"You are playing a game of diplomacy as {country}. {personality} "
         if api_url == "":
@@ -630,52 +722,58 @@ class OpenAIPlayer(Player):
         history_file.write(json.dumps(self.history))
         history_file.close()
 
-    def prompt(self,text,response_format):
+    def prompt(self, text, response_format):
+        if time.time() - OpenAIPlayer.last_polled < 4.1:
+            time.sleep(4.1 - (time.time() - OpenAIPlayer.last_polled))
+        OpenAIPlayer.last_polled = time.time()
+        
         completion = None
         while completion == None:
             try:
                 completion = self.client.beta.chat.completions.parse(
                     model=self.model,
                     messages=[
-                        {"role": "developer", "content": self.system_prompt}] +
-                        self.history +
-                        [{"role": "user", "content": text}],
+                                 {"role": "developer", "content": self.system_prompt}] +
+                             self.history +
+                             [{"role": "user", "content": text}],
                     response_format=response_format,
                 )
             except Exception as e:
                 print(e)
                 sleep(10)
         return completion.choices[0].message.parsed
-    
+
     def gen_discussion(self):
         if self.orders != []:
             if self.message_queue == "":
-                #Don't bother generating a discussion if there's nothing to respond to.
+                # Don't bother generating a discussion if there's nothing to respond to.
                 return 1
-            answer = self.prompt("You have submitted your orders for this turn, do you want to respond to the " + str(len(self.message_queue)) + " characters of messages in queue.", YesNo)
+            answer = self.prompt("You have submitted your orders for this turn, do you want to respond to the " + str(
+                len(self.message_queue)) + " characters of messages in queue.", YesNo)
             if answer.yn == YN.N:
                 print("Does not want to communicate further")
                 return 1
-        
-        #Generate the response from the AI.
-        prompt_text = game.start_turn() + game.supply_control_str() + (self.message_queue if len(self.message_queue) > 0 else "You have no new messages, what would you like to send?")
+
+        # Generate the response from the AI.
+        prompt_text = game.start_turn() + game.supply_control_str() + (self.message_queue if len(
+            self.message_queue) > 0 else "You have no new messages, what would you like to send?")
         discussion = self.prompt(prompt_text, Discussion)
-        
-        #Update and clear message history.
+
+        # Update and clear message history.
         if self.message_queue != "":
-            self.history.append({"role":"user","content":self.message_queue})
+            self.history.append({"role": "user", "content": self.message_queue})
         response = "[To "
         for message in discussion.messages:
             for country in message.to:
                 response += country.value + ", "
             response = response[:-2] + "]| " + message.body + "\n"
-        #response += "Readiness: " + str(discussion.turn_readiness)
-        self.history.append({"role":"assistant","content":response})
+        # response += "Readiness: " + str(discussion.turn_readiness)
+        self.history.append({"role": "assistant", "content": response})
         self.message_queue = ""
-            
-        #Process Discusion, send messages to correct places.
+
+        # Process Discusion, send messages to correct places.
         for message in discussion.messages:
-             for countryi in message.to:
+            for countryi in message.to:
                 cc = []
                 for countryj in message.to:
                     if countryi != countryj:
@@ -687,34 +785,52 @@ class OpenAIPlayer(Player):
                         output += countryj.value + ", "
                     output = output[:-2]
                 output += ":\n" + message.body + "|\n"
-                #print(output)
+                # print(output)
                 game.players[countryi.value].message_queue += output
-        
+
         return discussion.turn_readiness
 
     def gen_orders(self):
         prompt_text = game.start_turn() + game.supply_control_str() + ". " + game.VALID_TILES + ". Please submit your orders for this turn."
-        attempt = self.prompt(prompt_text, Orders)
-        attempt = attempt.orders
-        #valid, reason = 
-        #while not valid:
-        history_string = "Submit:\n"
-        for o in attempt:
-            history_string += str(o) + ", "
-        self.history.append({"role":"assistant","content":history_string})
-        self.orders = attempt
-        return attempt
+        orders = self.prompt(prompt_text, Orders)
+        for unused in range(3):
+            print(orders)
+            #Give the AI 3 attempts to make a valid set of moves
+            errs = []
+            current_attempt = []
+            history_string = "Submit:\n"
+            for o in orders.orders:
+                a = convert_order_to_strict(o)
+                current_attempt.append(a)
+                valid, reason = a.check_validity(self.country)
+                if not valid:
+                    errs.append(reason)
+                history_string += str(a) + ", "
 
-    def gen_retreat(self,unit_type,tile):
+            #print(current_attempt)
+            print(errs)
+            self.history.append({"role": "assistant", "content": history_string})
+            if len(errs) == 0:
+                break
+            else:
+                prompt_text = game.start_turn() + game.supply_control_str() + ". " + game.VALID_TILES + ". Some of your orders have errors, please reveiw your orders, Errors:" + str(errs)
+                orders = self.prompt(prompt_text, Orders)
+                self.history = self.history[:-1]
+
+        self.orders = current_attempt
+        return current_attempt
+
+    def gen_retreat(self, unit_type, tile):
         adj = ""
         for tile_i in (board[tile].land_adj if unit_type == "a" else board[tile].sea_adj):
             adj += tile_i.abbr + ", "
         adj = adj[:-2]
-        prompt_text = "Your " + ("army" if unit_type == "a" else "fleet") + " in " + tile + " has been dislodged, please move it to an adjacent tile " + "(" + adj + ")"
-        #print(prompt_text)
-        return self.prompt(prompt_text,Retreat)
+        prompt_text = "Your " + (
+            "army" if unit_type == "a" else "fleet") + " in " + tile + " has been dislodged, please move it to an adjacent tile " + "(" + adj + ")"
+        # print(prompt_text)
+        return self.prompt(prompt_text, Retreat)
 
-    def gen_winter(self,num_units):
+    def gen_winter(self, num_units):
         if num_units > 0:
             free_tiles = 0
             free_tiles_str = ""
@@ -726,13 +842,15 @@ class OpenAIPlayer(Player):
                 return
             else:
                 free_tiles_str = home_supply_str[:-2]
-                builds = min(num_units,free_tiles)
-                prompt_text = game.start_turn() + "You've gained "+ str(builds) + " units. You may build them on any of the following tiles: " + free_tiles_str
-                return self.prompt(prompt_text,Build)
+                builds = min(num_units, free_tiles)
+                prompt_text = game.start_turn() + "You've gained " + str(
+                    builds) + " units. You may build them on any of the following tiles: " + free_tiles_str
+                return self.prompt(prompt_text, Build)
         else:
             num_units = -num_units
-            prompt_text = game.start_turn() + "You've lost "+str(num_units)+ " supply centres. Please select "+str(num_units)+" units to disband."
-            return self.prompt(prompt_text,Disband)
+            prompt_text = game.start_turn() + "You've lost " + str(num_units) + " supply centres. Please select " + str(
+                num_units) + " units to disband."
+            return self.prompt(prompt_text, Disband)
 
 
 def backstab_import():
@@ -756,7 +874,6 @@ def backstab_import():
     board_state = boardstate + "|"
 
 
-
 OPENAI_KEY = environ["OPENAI_API_KEY"]
 GEMINI_KEY = environ["GEMINI_API_KEY"]
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
@@ -770,7 +887,7 @@ game.players = {
     "Russia": OpenAIPlayer("Russia", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False),
     "France": OpenAIPlayer("France", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False),
 }
-'''gamers = [x for x in game.players.keys()]
+gamers = [x for x in game.players.keys()]
 submitted = set()
 for i in range(21,0,-1):
     if len(submitted) == 7:
@@ -784,21 +901,26 @@ for i in range(21,0,-1):
         print(game.players[x].history)#[-1]["content"])
         print(y)
         if y >= i/20 and x not in submitted:
-            sleep(4)
             print(game.players[x].gen_orders())
             submitted.add(x)
             if len(submitted) == 7:
                 break
-        sleep(4)'''
+
+for player in game.players.values():
+    print(player.country)
+    for order in player.orders:
+        print("\t",order)
 
 import pickle
-fo = open("history/dill.dat","rb")
+
+fo = open("history/dill.dat", "rb")
 orders = pickle.load(fo)
 fo.close()
 for key, order_list in orders.items():
     print(key)
     for order in order_list:
-        print(order,order.check_validity(key))
+        order = convert_order_to_strict(order)
+        print(order, order.check_validity(key))
 
 '''fo = open("history/_save.txt")
 save_file = fo.read().split("|")
