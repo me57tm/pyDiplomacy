@@ -4,3 +4,5 @@ openai
 pygame
 pydantic
 flask
+selenium
+flask_socketio

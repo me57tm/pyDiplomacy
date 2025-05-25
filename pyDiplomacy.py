@@ -854,7 +854,8 @@ class OpenAIPlayer(Player):
                     socketio.emit("update_screen", {"country_image": message.sender + ".svg", "model_image": [
                         random.choice(["ChatGPT_White.svg", "DeepSeek.svg", "Gemini.svg", "Google.svg"])]})
                     socketio.emit("add_press",
-                                  {"type": "message", "sender": message.sender, "recipients": [country.name for country in message.to],
+                                  {"type": "message", "sender": message.sender,
+                                   "recipients": [country.name for country in message.to],
                                    "body": message.body})
                     game.players[message.sender].voice.say(message.body)
                     socketio.emit("update_screen", {"screen": "off"})
@@ -882,7 +883,8 @@ class OpenAIPlayer(Player):
             message = MessageWithSender(message, self.country)
             if self.ui:
                 socketio.emit("add_press",
-                              {"type": "message", "sender": self.country, "recipients": [country.name for country in message.to],
+                              {"type": "message", "sender": self.country,
+                               "recipients": [country.name for country in message.to],
                                "body": message.body})
             for country in message.to:
                 game.players[country.value].message_queue.append(message)
@@ -977,15 +979,15 @@ def backstab_import():
 def adjudicate(orders):
     global board
     global game
-    print("Adjudicating")
+    # print("Adjudicating")
     valid_orders = {}
     for key, order_list in orders.items():
-        print(key)
+        # print(key)
         new_order_list = []
         doneTiles = []
         for order in order_list:
             order = convert_order_to_strict(order)
-            print(order, order.check_validity(key))
+            # print(order, order.check_validity(key))
             if type(order) != InvalidOrder:
                 if order.check_validity(key)[0] == False:
                     if board[order.unit.location].unit[1] == key:
@@ -1021,11 +1023,12 @@ def adjudicate(orders):
                                                  target_start=None,
                                                  target_end=None))
 
-    print("\nValids")
+    '''print("\nValids")
     for key, order_list in valid_orders.items():
         print(key)
         for order in order_list:
-            print(order, order.check_validity(key))
+            print(order, order.check_validity(key))'''
+    return valid_orders.values()
 
 
 OPENAI_KEY = environ["OPENAI_API_KEY"]
@@ -1033,16 +1036,13 @@ GEMINI_KEY = environ["GEMINI_API_KEY"]
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
 game.players = {
-    "England": OpenAIPlayer("England", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False,
-                            personality=get_personality(1)),
-    "Austria": OpenAIPlayer("Austria", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False,
-                            personality=get_personality(1), ui=True),
-    "Italy": OpenAIPlayer("Italy", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False, personality=get_personality(1)),
-    "Turkey": OpenAIPlayer("Turkey", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False, personality=get_personality(1)),
-    "Germany": OpenAIPlayer("Germany", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False,
-                            personality=get_personality(1)),
-    "Russia": OpenAIPlayer("Russia", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False, personality=get_personality(1)),
-    "France": OpenAIPlayer("France", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False, personality=get_personality(1)),
+    "England": OpenAIPlayer("England", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False),
+    "Austria": OpenAIPlayer("Austria", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False, ui=True),
+    "Italy": OpenAIPlayer("Italy", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False, ),
+    "Turkey": OpenAIPlayer("Turkey", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False, ),
+    "Germany": OpenAIPlayer("Germany", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False, ),
+    "Russia": OpenAIPlayer("Russia", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False, ),
+    "France": OpenAIPlayer("France", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False, ),
 }
 
 
@@ -1072,113 +1072,134 @@ def main():
             print("\t", order)
 
 
-main_thread = threading.Thread(target=main)
+'''main_thread = threading.Thread(target=main)
 main_thread.start()
 socketio.run(app, allow_unsafe_werkzeug=True)
 sleep(5)
-socketio.emit("add_press", {"type": "banner", "text": "Spring 1901"})
+socketio.emit("add_press", {"type": "banner", "text": "Spring 1901"})'''
 
-'''import pickle
+import pickle
 
 fo = open("history/dill.dat", "rb")
 orders = pickle.load(fo)
-fo.close()'''
-
-# adjudicate(orders)
-
-'''fo = open("history/_save.txt")
-save_file = fo.read().split("|")
 fo.close()
-if save_file != "":  # TODO work out if player has submitted orders
-    for player in game.players.values():
-        player.turn = int(save_file[0])
-    game.board_state = save_file[1]
-    saved_orders = save_file[2:]
-    for saved_order in saved_orders:
-        saved_order = saved_order.split(",\n")
-        saved_order[0] = saved_order[0].replace("\n", "")
-        try:
-            saved_order[1] = saved_order[1].replace("\t", "")
-            orders[saved_order[0]] = saved_order[1]
-        except IndexError:
-            pass'''
 
-'''for p in players:
-    print(p.country + ",",end="\n")
-    for a in p.armies:
-        print("a " + a.abbr,end="\n")
-    for f in p.fleets:
-        print("f " + f.abbr,end="\n")
+orders = adjudicate(orders)
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.wait import WebDriverWait
+from selenium.webdriver import ActionChains
 
-def process_discussion(player,discussion):
-    for entry in discussion.messages:
-        mailto = entry.to
-        body = entry.body
-        for countryi in mailto:
-                cc = []
-                for countryj in mailto:
-                    if countryi != countryj:
-                        cc.append(countryj)
-                message = "From " + player.country
-                if len(cc) > 0:
-                    message += " cc "
-                    for countryj in cc:
-                        if countryj in message_queue.keys():
-                            message += countryj.value + ", "
-                    message = message[:-2]
-                message += ":" + body + "|\n"
-                game.countries[countryi.value] += message
+driver = webdriver.Chrome()
+driver.get("https://www.backstabbr.com/")
+bs = open("../backstabbr.txt")
+session_cookie = bs.readline()
+bs.close()
+driver.add_cookie({"name": "session", "value": session_cookie})
+driver.get("https://www.backstabbr.com/sandbox/...")
+sleep(5)
+# tile1 = driver.find_element(By.ID,"ter_War")
+# tile2 = driver.find_element(By.ID,"ter_Gal")
 
-i = 0
-j = 1
-while not turn_finished(orders):
-    print("------------------------" * 2)
-    print(players[i].country + "'s Turn (Queue Length: " + str(len(players[i].message_queue)) + ")")
-    process_message(players[i], message_queue, orders)
+actions = ActionChains(driver)
+
+
+# actions.move_to_element(tile1).click().perform()
+# actions.move_to_element(tile2).click().perform()
+# print(orders)
+def get_tile_id(abbr):
+    if abbr[3:] == "_nc" or abbr[3:] == "_sc" or abbr[3:] == "_ec":
+        abbr = abbr[:-3]
+    tile = board[abbr]
+    ter = "ter_"
+    if tile.land:
+        ter += abbr.title()
+    else:
+        ter += abbr.upper()
+    return ter
+
+def click_tile(abbr):
+    if abbr[3:] == "_nc" or abbr[3:] == "_sc" or abbr[3:] == "_ec":
+        abbr = abbr[:-3]
+    xoffset = 0
+    yoffset = 0
+    match abbr:
+        case "bar":
+            xoffset = 20
+            yoffset = -50
+        case "bot":
+            yoffset = 10
+            xoffset = -30
+        case "nwy":
+            xoffset = -20
+        case "lvp":
+            xoffset = 10
+        case "pru":
+            yoffset = 10
+        case "mao":
+            yoffset = -100
+        case "sev":
+            yoffset = -50
+        case "rum":
+            xoffset = 10
+    board_tile = board[abbr]
+    tile_id = "ter_"
+    if board_tile.land:
+        tile_id += abbr.title()
+    else:
+        tile_id += abbr.upper()
+    tile = driver.find_element(By.ID, tile_id)
+    actions.move_to_element_with_offset(tile, xoffset, yoffset).click().perform()
+
+
+'''bad_tiles = ["bar", "bot", "nwy", "lvp", "pru", "mao", "sev", "rum", "stp???"]
+for tile in bad_tiles:
     sleep(4)
-    i = (i + 1) % 7
-    if i == 0:
-        print("~~~~~~~~~~~~~~~~~~~~~" * 2)
-        print("Negotiation Round Over!")
-        print(orders)
-        print(message_queue)
-        temp_player = players[6]
-        random.shuffle(players)
-        if players[0] == temp_player:  # Check that a player doesn't move twice in a row
-            players[0] = players[6]
-            players[6] = temp_player
-        input("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+    print("Clicking on " + tile)
+    xoffset = 0
+    yoffset = 0
+    match tile:
+        case "bar":
+            xoffset = 20
+            yoffset = -50
+        case "bot":
+            yoffset=10
+            xoffset=-30
+        case "nwy":
+            xoffset=-20
+        case "lvp":
+            xoffset=10
+        case "pru":
+            yoffset=10
+        case "mao":
+            yoffset=-100
+        case "sev":
+            yoffset = -50
+        case "rum":
+            xoffset = 10
+    tile = driver.find_element(By.ID, get_tile_id(tile))
+    actions.move_to_element_with_offset(tile,xoffset,yoffset).click().perform()'''
 
-print("ORDERS ARE IN")
-for player in players:
-    print(player.country + ",\n"+orders[player.country])
 
-turn_result = ""
-for player in players:
-    # TODO: Allow the program to automatically resolve turns so we don't need to do this / import from backstabbr.
-    turn_result += player.country + ",\n"
-    print(player.country + "'s Orders:")
-    for order in orders[player.country].split("\n"):
-        turn_result += order
-        success = input(order + "\n\t>>>")
-        if success == "":
-            turn_result += " succeeds\n"
+for o in orders:
+    for order in o:
+        print(order)
+        sleep(0.5)
+        if order.mtype == MoveType.HOLD:
+            click_tile(order.unit.location)
+            click_tile(order.unit.location)
+        elif order.mtype == MoveType.MOVE:
+            click_tile(order.unit.location)
+            click_tile(order.target_end)
         else:
-            turn_result += " fails (" + success + ")\n"
+            click_tile(order.unit.location)
+            click_tile(order.target_start.location)
+            if order.mtype == MoveType.SUPPORT:
+                button = driver.find_element(By.ID, "order_button_support")
+            else:
+                button = driver.find_element(By.ID, "order_button_convoy")
+            button.click()
+            click_tile(order.target_end)
 
-orders = {"Austria": "", "England": "", "France": "", "Germany": "", "Italy": "", "Russia": "", "Turkey": ""}
-for player in players:
-    player.turn += 1
-    message_queue[player.country] += "[The turn has completed! orders were as follows]:" + turn_result + "|"
-    player.submitted = False
-print(message_queue[players[0].country])
-print("Please copy the backstabbr board")
-backstab_import()
-
-
-fo = open("history/_save.txt", "w")
-fo.write(str(players[0].turn) + "|" + board_state)
-for country, order in orders.items():
-    fo.write(country + "," + order + "|")
-for player in players:
-    player.dump_history()'''
+while True:
+    sleep(600)

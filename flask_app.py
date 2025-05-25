@@ -13,4 +13,3 @@ def twitch_ui():
 @socketio.event
 def connect():
     pass
-    #socketio.emit("update_title", {"image": "connected.svg", "title": "UI Connected!"})
