@@ -1,10 +1,29 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
+    <meta charset="UTF-8">
+    <title>pyDiplomacy</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.5.1/jquery.min.js" integrity="sha512-bLT0Qm9VnAYZDflyKcBaQ2gg0hSYNQrJ8RilYldYQ1FxQYoCLtUjuuRuZo+fjqhx/qtq/1itJ0C2ejDxltZVFg==" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/3.0.4/socket.io.js" integrity="sha512-aMGMvNYu8Ue4G+fHa359jcPb1u+ytAF+P2SCb+PxrjCdO3n3ZTxJ30zuH39rimUggmTwmh2u7wvQsDTHESnmfQ==" crossorigin="anonymous"></script>
+    <script src="/static/update_page.js"></script>
+    <link rel="stylesheet" href="/static/index.css"/>
 </head>
 <body>
-$END$
+<div id="the-container">
+    <iframe id="backstabbr" src="https://www.backstabbr.com/sandbox/..."></iframe>
+    <div id="ui">
+        <div id="screen" class="crt"><img id="flag" class="screen-image" src="/static/flags/England.svg"><img id="model" class="screen-image" src="/static/logos/Gemini.svg"></div>
+        <div id="press">
+            <!--<div class="banner">Dummy Banner</div>
+            <div class="message">
+                <span class="message-head">
+                    <span class="sender"><img src="/static/flags/Austria.svg" class="press-flag"><span>From: (Player) Austria</span></span>
+                    <span class="recipient"><img src="/static/flags/England.svg" class="press-flag">To: England</span>
+                </span>
+                <span class="message-body">Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse porta massa enim, id ornare massa malesuada nec. Donec non laoreet risus. Donec auctor nisl quam, fringilla tincidunt magna tempus sed. Nam eu sagittis dui. Integer eu augue tempor tellus sagittis tincidunt. Ut pretium eros erat, nec posuere tortor imperdiet in. Maecenas mattis ante nec leo vulputate cursus. Nulla venenatis auctor tortor et hendrerit. Morbi id libero enim. Duis facilisis a justo eget interdum. Nulla in faucibus nisl. Nunc lorem lectus, bibendum ut aliquam eu, condimentum eu ipsum. In condimentum tristique nibh, nec pellentesque justo rutrum vel. Duis blandit justo in tellus porttitor vehicula. Nam mi purus, convallis quis nibh ut, semper volutpat ligula. Sed quis auctor quam, ut commodo nisi. Fusce congue nisi at turpis consectetur sollicitudin. Nam purus purus, aliquam vitae sagittis at, fermentum ac odio. Nullam mi ante, tristique a fermentum eu, luctus non erat. Praesent nec augue at mauris gravida tincidunt. Vivamus porta nisi quis lectus dignissim placerat.</span>-->
+        </div>
+        </div>
+        <form id="form"></form>
+    </div>
 </body>
 </html>

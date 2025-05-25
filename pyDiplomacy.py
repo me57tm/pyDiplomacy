@@ -6,16 +6,19 @@ import random
 import json
 from enum import Enum
 from pygame import mixer
-import time
+from time import sleep, time
 from os import environ
 from openai import OpenAI
 from pydantic import BaseModel, Field
 from types import SimpleNamespace
+import threading
+from aiTest import get_personality
+from flask_app import *
 
 mixer.init()
 
 
-class Tile():
+class Tile:
     name = ""
     abbr = ""
     land_adj = None
@@ -250,6 +253,7 @@ def createBoard():
         board[sc].supply = True
     return board
 
+
 board = createBoard()
 
 
@@ -293,6 +297,29 @@ class Message(BaseModel):
     body: str
 
 
+class MessageWithSender:
+    sender = None
+    to = []
+    body = ""
+
+    def __init__(self, message, sender):
+        self.to = message.to
+        self.body = message.body
+        self.sender = sender
+
+    def __str__(self):
+        out = "Message from " + self.sender + " to " + self.to[0].value
+        if len(self.to) > 1:
+            out += " cc "
+            for i in range(1, len(self.to)):
+                out += self.to[i].value + ", "
+            out = out[:-2]
+        out += " reads:\n"
+        out += self.body
+        out += "|\n"
+        return out
+
+
 class UnitLocation(BaseModel):
     utype: Unit
     location: str = Field(description="Map tile this unit is located on. 3 letter string (except for split coasts)")
@@ -313,6 +340,7 @@ class InvalidOrder(BaseModel):
 
     def check_validity(self, country):
         return False, self.reason
+
     def __str__(self):
         return "Malformed Order"
 
@@ -357,17 +385,19 @@ class StrictOrder(BaseModel):
             self_adjacent = tile_self.land_adj
         if self.mtype == MoveType.MOVE:
             if tile_end not in self_adjacent:
-                return False, self.unit.location + " and " + self.target_end + " are not adjacent. " +self.unit.location + " is adjacent to " + str(board[self.unit.location].land_adj) + " by land and " + str(board[self.unit.location].sea_adj) + " by sea."
+                return False, self.unit.location + " and " + self.target_end + " are not adjacent. " + self.unit.location + " is adjacent to " + str(
+                    board[self.unit.location].land_adj) + " by land and " + str(
+                    board[self.unit.location].sea_adj) + " by sea."
             else:
                 return True, "Move is valid."
 
-        if tile_target.unit[0] == "f":
+        if tile_target.unit[0] == "f":  # TODO: I don't think this logic is entirely correct.
             target_adjacent = tile_target.sea_adj
         else:
             target_adjacent = tile_target.land_adj
-        supportable_adjacent = []  # Checks if a unit can actually support the target eg an army can't wade across an ocean to support a fleet
         if self.unit.utype == Unit.FLEET:
-            supportable_adjacent = tile_target.sea_adj
+            # Checks if a unit can actually support the target eg an army can't wade across an ocean to support a fleet
+            supportable_adjacent = tile_target.sea_adj + tile_target.land_adj
         else:
             supportable_adjacent = tile_target.land_adj
 
@@ -375,12 +405,16 @@ class StrictOrder(BaseModel):
             if self.target_start.location == self.unit.location:
                 return False, "A unit may not support itself."
             if tile_target not in self_adjacent:
-                return False, self.unit.location + " and " + self.target_start.location + " are not adjacent. " +  +self.unit.location + " is adjacent to " + str(board[self.unit.location].land_adj) + " by land and " + str(board[self.unit.location].sea_adj) + " by sea."
+                return False, self.unit.location + " and " + self.target_start.location + " are not adjacent. " + self.unit.location + " is adjacent to " + str(
+                    board[self.unit.location].land_adj) + " by land and " + str(
+                    board[self.unit.location].sea_adj) + " by sea."
             elif self.target_start.location == self.target_end:
                 return True, "Support Hold is valid."
-            elif tile_end not in self.target_adjacent:
-                return False, self.target_start.location + " and " + self.target_end + " are not adjacent. "  +self.target_start.location + " is adjacent to " + str(board[self.target_start.location].land_adj) + " by land and " + str(board[self.target_start.location].sea_adj) + " by sea."
-            elif tile_end not in self.supportable_adjacent:
+            elif tile_end not in target_adjacent:
+                return False, self.target_start.location + " and " + self.target_end + " are not adjacent. " + self.target_start.location + " is adjacent to " + str(
+                    board[self.target_start.location].land_adj) + " by land and " + str(
+                    board[self.target_start.location].sea_adj) + " by sea."
+            elif tile_end not in supportable_adjacent:
                 return False, a_f(
                     self.unit.utype) + " is unable to support " + self.target_start.location + " to " + self.target_end + " as " + a_f(
                     self.unit.utype) + " cannot move to that tile."
@@ -435,7 +469,7 @@ def convert_order_to_strict(order):
         tile_code = tile_code.title()
         for tile in board.values():
             if tile.name == tile_code:
-                return tile_code.abbr
+                return tile.abbr
         return None
 
     if order.unit.location not in board.keys():
@@ -587,18 +621,20 @@ class Voice:
 
 class Player(SimpleNamespace):
     global board
+    ui = False
     armies = None
     fleets = None
     home_supply = None
     owned_tiles = None
     country = ""
-    message_queue = ""
+    message_queue = []
     orders = None
 
-    def __init__(self, country, createUnits = True):
+    def __init__(self, country, createUnits=True, ui=False):
         self.country = country
         self.orders = []
         self.home_supply = []
+        self.ui = ui
         match country:
             case "Austria":
                 self.home_supply = [board["vie"], board["bud"], board["tri"]]
@@ -611,7 +647,7 @@ class Player(SimpleNamespace):
             case "Turkey":
                 self.home_supply = [board["con"], board["smy"], board["ank"]]
             case "Russia":
-                self.home_supply = [board["mos"], board["war"], board["sev"],board["stp"]]
+                self.home_supply = [board["mos"], board["war"], board["sev"], board["stp"]]
             case "England":
                 self.home_supply = [board["lvp"], board["lon"], board["edi"]]
             case _:
@@ -647,19 +683,19 @@ class Player(SimpleNamespace):
             self.armies = []
             self.fleets = []
 
-    def add_army(tile):
+    def add_army(self, tile):
         if tile not in board or not tile.land:
             return False
         else:
-            self.armies.append(board[tile].set_unit(("a",self.country)))
-            
-    def add_fleet(tile):
+            self.armies.append(board[tile].set_unit(("a", self.country)))
+
+    def add_fleet(self, tile):
         if tile not in board or (tile.land and tile.sea_adj == []):
             return False
         else:
-            self.fleets.append(board[tile].set_unit(("f",self.country)))
+            self.fleets.append(board[tile].set_unit(("f", self.country)))
 
-    def remove_unit(tile):
+    def remove_unit(self, tile):
         if tile not in board:
             return False
         else:
@@ -678,7 +714,7 @@ class Player(SimpleNamespace):
         raise NotImplementedError
 
     def submitted(self):
-        return orders == ""
+        return self.orders == ""
 
 
 class Game(SimpleNamespace):
@@ -726,11 +762,11 @@ class OpenAIPlayer(Player):
     global game
     message_queue = None
     history = None
-    last_polled = time.time()
+    last_polled = time()
 
-    def __init__(self, country, api_key, model, api_url="", random_voice=True, personality=""):
-        super().__init__(country)
-        self.message_queue = ""
+    def __init__(self, country, api_key, model, api_url="", random_voice=True, personality="", ui=False):
+        super().__init__(country, ui=ui)
+        self.message_queue = []
         self.history = []
 
         # history_file = open("history/" + country + ".txt", "r")
@@ -773,10 +809,12 @@ class OpenAIPlayer(Player):
         history_file.close()
 
     def prompt(self, text, response_format):
-        if time.time() - OpenAIPlayer.last_polled < 4.1:
-            time.sleep(4.1 - (time.time() - OpenAIPlayer.last_polled))
-        OpenAIPlayer.last_polled = time.time()
-        
+        if text == "":
+            return None
+        if time() - OpenAIPlayer.last_polled < 4.1:
+            sleep(4.1 - (time() - OpenAIPlayer.last_polled))
+        OpenAIPlayer.last_polled = time()
+
         completion = None
         while completion == None:
             try:
@@ -795,48 +833,59 @@ class OpenAIPlayer(Player):
 
     def gen_discussion(self):
         if self.orders != []:
-            if self.message_queue == "":
+            if self.message_queue == []:
                 # Don't bother generating a discussion if there's nothing to respond to.
                 return 1
             answer = self.prompt("You have submitted your orders for this turn, do you want to respond to the " + str(
-                len(self.message_queue)) + " characters of messages in queue.", YesNo)
+                len(self.message_queue)) + " message(s) in the queue.", YesNo)
             if answer.yn == YN.N:
                 print("Does not want to communicate further")
                 return 1
 
         # Generate the response from the AI.
-        prompt_text = game.start_turn() + game.supply_control_str() + (self.message_queue if len(
-            self.message_queue) > 0 else "You have no new messages, what would you like to send?")
+        message_text = ""
+        prompt_text = game.start_turn() + game.supply_control_str()
+        if len(self.message_queue) > 0:
+            prompt_text += "\n"
+            for message in self.message_queue:
+                message_text += str(message)
+                if self.ui:
+                    print(str(message))
+                    socketio.emit("update_screen", {"country_image": message.sender + ".svg", "model_image": [
+                        random.choice(["ChatGPT_White.svg", "DeepSeek.svg", "Gemini.svg", "Google.svg"])]})
+                    socketio.emit("add_press",
+                                  {"type": "message", "sender": message.sender, "recipients": [country.name for country in message.to],
+                                   "body": message.body})
+                    game.players[message.sender].voice.say(message.body)
+                    socketio.emit("update_screen", {"screen": "off"})
+                    sleep(2)
+            prompt_text += message_text
+        else:
+            prompt_text += "You have no new messages, what would you like to send?"
         discussion = self.prompt(prompt_text, Discussion)
 
         # Update and clear message history.
-        if self.message_queue != "":
-            self.history.append({"role": "user", "content": self.message_queue})
-        response = "[To "
+        if self.message_queue != []:
+            self.history.append({"role": "user", "content": message_text})
+        response = ""
         for message in discussion.messages:
+            response += "[Message sent to "
             for country in message.to:
                 response += country.value + ", "
             response = response[:-2] + "]| " + message.body + "\n"
         # response += "Readiness: " + str(discussion.turn_readiness)
         self.history.append({"role": "assistant", "content": response})
-        self.message_queue = ""
+        self.message_queue = []
 
         # Process Discusion, send messages to correct places.
         for message in discussion.messages:
-            for countryi in message.to:
-                cc = []
-                for countryj in message.to:
-                    if countryi != countryj:
-                        cc.append(countryj)
-                output = "From " + self.country
-                if len(cc) > 0:
-                    output += ", cc "
-                    for countryj in cc:
-                        output += countryj.value + ", "
-                    output = output[:-2]
-                output += ":\n" + message.body + "|\n"
-                # print(output)
-                game.players[countryi.value].message_queue += output
+            message = MessageWithSender(message, self.country)
+            if self.ui:
+                socketio.emit("add_press",
+                              {"type": "message", "sender": self.country, "recipients": [country.name for country in message.to],
+                               "body": message.body})
+            for country in message.to:
+                game.players[country.value].message_queue.append(message)
 
         return discussion.turn_readiness
 
@@ -845,7 +894,7 @@ class OpenAIPlayer(Player):
         orders = self.prompt(prompt_text, Orders)
         for unused in range(3):
             print(orders)
-            #Give the AI 3 attempts to make a valid set of moves
+            # Give the AI 3 attempts to make a valid set of moves
             errs = []
             current_attempt = []
             history_string = "Submit:\n"
@@ -857,13 +906,14 @@ class OpenAIPlayer(Player):
                     errs.append(reason)
                 history_string += str(a) + ", "
 
-            #print(current_attempt)
+            # print(current_attempt)
             print(errs)
             self.history.append({"role": "assistant", "content": history_string})
             if len(errs) == 0:
                 break
             else:
-                prompt_text = game.start_turn() + game.supply_control_str() + ". " + game.VALID_TILES + ". Some of your orders have errors, please reveiw your orders, Errors:" + str(errs)
+                prompt_text = game.start_turn() + game.supply_control_str() + ". " + game.VALID_TILES + ". Some of your orders have errors, please reveiw your orders, Errors:" + str(
+                    errs)
                 orders = self.prompt(prompt_text, Orders)
                 self.history = self.history[:-1]
 
@@ -923,6 +973,7 @@ def backstab_import():
     global board_state
     board_state = boardstate + "|"
 
+
 def adjudicate(orders):
     global board
     global game
@@ -939,7 +990,7 @@ def adjudicate(orders):
                 if order.check_validity(key)[0] == False:
                     if board[order.unit.location].unit[1] == key:
                         new_order = StrictOrder(mtype=MoveType.HOLD,
-                                                unit = UnitLocation(
+                                                unit=UnitLocation(
                                                     utype=board[order.unit.location].unit[0],
                                                     location=order.unit.location),
                                                 target_start=None,
@@ -964,18 +1015,17 @@ def adjudicate(orders):
             order_tiles.add(order.unit.location)
         for tile in (unit_tiles - order_tiles):
             valid_orders[key].append(StrictOrder(mtype=MoveType.HOLD,
-                                                unit = UnitLocation(
-                                                    utype=board[tile].unit[0],
-                                                    location=tile),
-                                                target_start=None,
-                                                target_end=None))
-            
+                                                 unit=UnitLocation(
+                                                     utype=board[tile].unit[0],
+                                                     location=tile),
+                                                 target_start=None,
+                                                 target_end=None))
+
     print("\nValids")
     for key, order_list in valid_orders.items():
         print(key)
         for order in order_list:
             print(order, order.check_validity(key))
-            
 
 
 OPENAI_KEY = environ["OPENAI_API_KEY"]
@@ -983,45 +1033,58 @@ GEMINI_KEY = environ["GEMINI_API_KEY"]
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
 game.players = {
-    "England": OpenAIPlayer("England", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False),
-    "Austria": OpenAIPlayer("Austria", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False),
-    "Italy": OpenAIPlayer("Italy", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False),
-    "Turkey": OpenAIPlayer("Turkey", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False),
-    "Germany": OpenAIPlayer("Germany", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False),
-    "Russia": OpenAIPlayer("Russia", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False),
-    "France": OpenAIPlayer("France", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False),
+    "England": OpenAIPlayer("England", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False,
+                            personality=get_personality(1)),
+    "Austria": OpenAIPlayer("Austria", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False,
+                            personality=get_personality(1), ui=True),
+    "Italy": OpenAIPlayer("Italy", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False, personality=get_personality(1)),
+    "Turkey": OpenAIPlayer("Turkey", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False, personality=get_personality(1)),
+    "Germany": OpenAIPlayer("Germany", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False,
+                            personality=get_personality(1)),
+    "Russia": OpenAIPlayer("Russia", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False, personality=get_personality(1)),
+    "France": OpenAIPlayer("France", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False, personality=get_personality(1)),
 }
-'''gamers = [x for x in game.players.keys()]
-submitted = set()
-for i in range(21,0,-1):
-    if len(submitted) == 7:
-        break
-    print("Threshold:",i/20)
-    print(submitted)
-    for x in gamers:
-        print(x)
-        #print(game.players[x].message_queue)
-        y = game.players[x].gen_discussion()
-        print(game.players[x].history)#[-1]["content"])
-        print(y)
-        if y >= i/20 and x not in submitted:
-            print(game.players[x].gen_orders())
-            submitted.add(x)
-            if len(submitted) == 7:
-                break
 
-for player in game.players.values():
-    print(player.country)
-    for order in player.orders:
-        print("\t",order)'''
 
-import pickle
+def main():
+    gamers = [x for x in game.players.keys()]
+    submitted = set()
+    for i in range(21, 0, -1):
+        if len(submitted) == 7:
+            break
+        print("Threshold:", i / 20)
+        print(submitted)
+        for x in gamers:
+            print(x)
+            # print(game.players[x].message_queue)
+            y = game.players[x].gen_discussion()
+            print(game.players[x].history)  # [-1]["content"])
+            print(y)
+            if y >= i / 20 and x not in submitted:
+                print(game.players[x].gen_orders())
+                submitted.add(x)
+                if len(submitted) == 7:
+                    break
+
+    for player in game.players.values():
+        print(player.country)
+        for order in player.orders:
+            print("\t", order)
+
+
+main_thread = threading.Thread(target=main)
+main_thread.start()
+socketio.run(app, allow_unsafe_werkzeug=True)
+sleep(5)
+socketio.emit("add_press", {"type": "banner", "text": "Spring 1901"})
+
+'''import pickle
 
 fo = open("history/dill.dat", "rb")
 orders = pickle.load(fo)
-fo.close()
+fo.close()'''
 
-adjudicate(orders)
+# adjudicate(orders)
 
 '''fo = open("history/_save.txt")
 save_file = fo.read().split("|")

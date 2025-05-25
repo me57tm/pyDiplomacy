@@ -1,3 +1,4 @@
+import time
 from os import environ
 from enum import Enum
 from pydantic import BaseModel, Field
@@ -17,11 +18,11 @@ class YN(Enum):
 class YesNo(BaseModel):
     yn: YN
 
-print(client.beta.chat.completions.parse(
+'''print(client.beta.chat.completions.parse(
     model="gemini-2.0-flash",
     messages=[{"role": "user", "content": "yes or no"}],
      response_format=YesNo,
-    ))
+    ))'''
 
 personalities = [
     ["chaotic","lawful"],["evil","moral"],["friendly"],["devious"],["trustworthy","untrustworthy"],
@@ -35,23 +36,28 @@ personalities = [
 #believes they're in a simulation.
 #would do any bet
 
-print("There are a total of "+ str(len(personalities)) + " traits.")
-traits = ""
-for i in range(5):
-    choice = random.choice(personalities)
-    traits += random.choice(choice) + ", "
-    personalities.remove(choice)
-#traits  += "keeps making references to stories from their childhood"
-print(traits)
-response = client.chat.completions.create(
-    model="gemini-2.0-flash",
-    messages=[
-        {"role": "developer", "content": "Your job is to summarise a list of randomly generated 'Personality traits' into a maximum of 2 sentances instructing an llm who will be playing the board game diplomacy how to act. You **MUST** include all listed traits, even if they are nonsensical or contradictory"},
-        {"role": "user", "content": traits}
-    ]
-)
-personality = response.choices[0].message.content
-print(personality)
+#print("There are a total of "+ str(len(personalities)) + " traits.")
+
+def get_personality(num_traits):
+    global personalities
+    traits = ""
+    for i in range(num_traits):
+        choice = random.choice(personalities)
+        traits += random.choice(choice) + ", "
+        personalities.remove(choice)
+    #traits  += "keeps making references to stories from their childhood"
+    #print(traits)
+    response = client.chat.completions.create(
+        model="gemini-2.0-flash",
+        messages=[
+            {"role": "developer", "content": "Your job is to summarise a list of randomly generated 'Personality traits' into a maximum of 2 sentances instructing an llm who will be playing the board game diplomacy how to act. You **MUST** include all listed traits, even if they are nonsensical or contradictory"},
+            {"role": "user", "content": traits}
+        ]
+    )
+    personality = response.choices[0].message.content
+    print(personality)
+    time.sleep(4)
+    return personality
 
 
 class Country(Enum):
@@ -98,7 +104,7 @@ class Discussion(BaseModel):
 class Orders(BaseModel):
     orders: list[Order]
     
-completion = client.beta.chat.completions.parse(
+'''completion = client.beta.chat.completions.parse(
     model="gemini-2.0-flash",
     #model="gpt-4o-2024-08-06",
     messages=[
@@ -109,3 +115,4 @@ completion = client.beta.chat.completions.parse(
 )
 x = completion.choices[0].message.parsed
 print(x)
+'''
