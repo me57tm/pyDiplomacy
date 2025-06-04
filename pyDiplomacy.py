@@ -12,6 +12,9 @@ from openai import OpenAI
 from pydantic import BaseModel, Field
 from types import SimpleNamespace
 import threading
+
+from selenium.common import NoSuchElementException
+
 from aiTest import get_personality
 from flask_app import *
 
@@ -536,10 +539,14 @@ class Retreat(BaseModel):
 
 class Build(BaseModel):
     builds: list[UnitLocation] = Field(description="List of new units to be built this turn.")
+    def __str__(self):
+        return "Building units: " + str(self.builds)
 
 
 class Disband(BaseModel):
     disbands: list[UnitLocation] = Field(description="List of locations of units to remove this turn.")
+    def __str__(self):
+        return "Disbanding units: " + str(self.disbands)
 
 
 class Voice:
@@ -684,13 +691,13 @@ class Player(SimpleNamespace):
             self.fleets = []
 
     def add_army(self, tile):
-        if tile not in board or not tile.land:
+        if tile not in board or not board[tile].land:
             return False
         else:
             self.armies.append(board[tile].set_unit(("a", self.country)))
 
     def add_fleet(self, tile):
-        if tile not in board or (tile.land and tile.sea_adj == []):
+        if tile not in board or (board[tile].land and board[tile].sea_adj == []):
             return False
         else:
             self.fleets.append(board[tile].set_unit(("f", self.country)))
@@ -709,6 +716,29 @@ class Player(SimpleNamespace):
                     self.fleets.remove(t)
                 t.unit = None
                 return True
+
+    def remove_all_units(self):
+        for tile in self.armies + self.fleets:
+            tile.unit = None
+        self.armies = []
+        self.fleets = []
+
+    def set_units(self, commands):
+        #takes a list of string commands eg "a bud" and converts them to units.
+        self.remove_all_units()
+        for command in commands:
+            command = command.split(" ")
+            if command[0] == "a":
+                self.add_army(command[1])
+            elif command[0] == "f":
+                self.add_fleet(command[1])
+            else:
+                #Make an assumption about what type of unit to add DO NOT DO THIS IF FORWARD CONSISTENCY IS REQUIRED.
+                #This is used just to ask the AI to disband a unit. I don't feel morally wrong telling them they have an army instead of a fleet sometimes.
+                if board[command[0]].land:
+                    self.add_army(command[0])
+                else:
+                    self.add_fleet(command[0])
 
     def prompt(self, message):
         raise NotImplementedError
@@ -932,28 +962,21 @@ class OpenAIPlayer(Player):
         # print(prompt_text)
         return self.prompt(prompt_text, Retreat)
 
-    def gen_winter(self, num_units):
+    def gen_winter(self, num_units, tiles):
+        if "stp sc nc" in tiles:
+            tiles.remove("stp sc nc")
+            tiles.append("stp")
+            tiles.append("stp_nc")
+            tiles.append("stp_sc")
         if num_units > 0:
-            free_tiles = 0
-            free_tiles_str = ""
-            for tile in self.home_supply:
-                if tile.unit is None and tile in self.owned_tiles:
-                    free_tiles_str += tile.abbr + ", "
-                    free_tiles += 1
-            if free_tiles == 0:
-                return
-            else:
-                free_tiles_str = home_supply_str[:-2]
-                builds = min(num_units, free_tiles)
-                prompt_text = game.start_turn() + "You've gained " + str(
-                    builds) + " units. You may build them on any of the following tiles: " + free_tiles_str
-                return self.prompt(prompt_text, Build)
+            num_builds = min(len(tiles), num_units)
+            prompt_text = game.start_turn() + "Please build new units on " + str(num_builds) + " of the following tiles: " + str(tiles) + (". Reminder you can ONLY build on ONE of the stp tiles, as one unit covers all 3" if "stp" in tiles else "")
+            return self.prompt(prompt_text, Build)
         else:
+            self.set_units(tiles)
             num_units = -num_units
-            prompt_text = game.start_turn() + "You've lost " + str(num_units) + " supply centres. Please select " + str(
-                num_units) + " units to disband."
+            prompt_text = game.start_turn() + "You've lost " + str(num_units) + " supply centres. Please select " + str(num_units) + " units to disband."
             return self.prompt(prompt_text, Disband)
-
 
 def backstab_import():
     x = []
@@ -1087,36 +1110,20 @@ fo.close()
 orders = adjudicate(orders)
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.wait import WebDriverWait
-from selenium.webdriver import ActionChains
+from selenium.webdriver import ActionChains, Keys
 
+
+#Set up Selenium.
 driver = webdriver.Chrome()
 driver.get("https://www.backstabbr.com/")
 bs = open("../backstabbr.txt")
 session_cookie = bs.readline()
 bs.close()
 driver.add_cookie({"name": "session", "value": session_cookie})
-driver.get("https://www.backstabbr.com/sandbox/...")
-sleep(5)
-# tile1 = driver.find_element(By.ID,"ter_War")
-# tile2 = driver.find_element(By.ID,"ter_Gal")
+driver.get("https://www.backstabbr.com/sandbox/5192838545276928/")
 
 actions = ActionChains(driver)
 
-
-# actions.move_to_element(tile1).click().perform()
-# actions.move_to_element(tile2).click().perform()
-# print(orders)
-def get_tile_id(abbr):
-    if abbr[3:] == "_nc" or abbr[3:] == "_sc" or abbr[3:] == "_ec":
-        abbr = abbr[:-3]
-    tile = board[abbr]
-    ter = "ter_"
-    if tile.land:
-        ter += abbr.title()
-    else:
-        ter += abbr.upper()
-    return ter
 
 def click_tile(abbr):
     if abbr[3:] == "_nc" or abbr[3:] == "_sc" or abbr[3:] == "_ec":
@@ -1151,40 +1158,19 @@ def click_tile(abbr):
     tile = driver.find_element(By.ID, tile_id)
     actions.move_to_element_with_offset(tile, xoffset, yoffset).click().perform()
 
-
-'''bad_tiles = ["bar", "bot", "nwy", "lvp", "pru", "mao", "sev", "rum", "stp???"]
-for tile in bad_tiles:
-    sleep(4)
-    print("Clicking on " + tile)
-    xoffset = 0
-    yoffset = 0
-    match tile:
-        case "bar":
-            xoffset = 20
-            yoffset = -50
-        case "bot":
-            yoffset=10
-            xoffset=-30
-        case "nwy":
-            xoffset=-20
-        case "lvp":
-            xoffset=10
-        case "pru":
-            yoffset=10
-        case "mao":
-            yoffset=-100
-        case "sev":
-            yoffset = -50
-        case "rum":
-            xoffset = 10
-    tile = driver.find_element(By.ID, get_tile_id(tile))
-    actions.move_to_element_with_offset(tile,xoffset,yoffset).click().perform()'''
+def screenshot_map():
+    driver.maximize_window()
+    x = driver.find_element(By.TAG_NAME, "svg")
+    y = x.screenshot_as_png
+    fo = open("map.png", "wb")
+    fo.write(y)
+    fo.close()
 
 
-for o in orders:
+#Input Orders
+'''for o in orders:
     for order in o:
-        print(order)
-        sleep(0.5)
+        #sleep(0.5)
         if order.mtype == MoveType.HOLD:
             click_tile(order.unit.location)
             click_tile(order.unit.location)
@@ -1201,5 +1187,113 @@ for o in orders:
             button.click()
             click_tile(order.target_end)
 
+# Submit Orders
+submit_button = driver.find_element(By.ID,"submit_orders_button")
+submit_button.send_keys(Keys.ENTER)
+
+sleep(0.5)
+#Grab Results & Take Screenshot
+driver.find_element(By.ID,"history_previous_season").click()
+#TODO: ADD TO HISTORY OF PLAYERS
+order_box = driver.find_element(By.ID,"orders-text")
+for row in order_box.find_elements(By.XPATH,"//tr"):
+    country = row.find_element(By.CLASS_NAME,"country").text
+    if country == "":
+        continue
+    else:
+        print(country)
+        for order in row.find_elements(By.CLASS_NAME,"orderstring"):
+            order_txt = order.text.lower()
+            order_txt = order_txt.replace("/","_")
+            print("\t"+order_txt)
+screenshot_map()
+
+
+# Grab Current Board State
+driver.find_element(By.ID,"history_next_season").click()'''
+
+'''season = driver.find_element(By.ID,"history_current_season")
+season = season.text.split(" ")[0]
+if season == "FALL":'''
+game.turn = 2
+for row in driver.find_elements(By.CSS_SELECTOR, "#orders-text tr"):
+    try:
+        country = row.find_element(By.CLASS_NAME, "country").text
+    except NoSuchElementException:
+        country = ""
+    if country == "":
+        continue
+    else:
+        print(country)
+        i = 0
+        tiles = []
+        num_builds = 0
+        for line in row.find_element(By.TAG_NAME, "td").text.split("\n"):
+            #print("\t"+str(i)+"\t"+line)
+            if line == "":
+                break
+            else:
+                if i == 0:
+                    if line[-7:] == "builds.":
+                        num_builds = int(line[6])
+                    else:
+                        num_builds = - int(line[4])
+                elif i == 1:
+                    pass
+                else:
+                    if len(line) < 10:
+                        #Line length greater than 10 shows "occupied" is in the line and it is impossible to build on this tile
+                        tiles.append(line.lower())
+            i += 1
+
+        if num_builds != 0:
+            change = game.players[country].gen_winter(num_builds,tiles)
+            if num_builds > 0:
+                ulocs = change.builds
+            else:
+                ulocs = change.disbands
+            i = 1
+            for uloc in ulocs:
+                if i > abs(num_builds):
+                    break
+                if num_builds > 0:
+                    if uloc.location in ["stp_sc","stp_nc"]:
+                        radio_id = uloc.location[:3].title() + "_" + uloc.utype.value.upper() + uloc.location[3:]
+                    else:
+                        radio_id = uloc.location.title() + "_" + uloc.utype.value.upper()
+                else:
+                    loc = uloc.location[:3]
+                    if board[loc].land:
+                        loc = loc.title()
+                    else:
+                        loc = loc.upper()
+                    radio_id = "disband_" + loc
+
+                try:
+                    actions.move_to_element(driver.find_element(By.ID,radio_id)).click().perform()
+                except:
+                    pass
+                    #The AI generally doesn't have a hard time producing valid winter turns. if so, too bad!
+                i += 1
+
+
+
+'''order_box = driver.find_element(By.ID,"orders-text")
+for row in order_box.find_elements(By.XPATH,"//tr"):
+    country = row.find_element(By.CLASS_NAME,"country").text
+    if country == "":
+        continue
+    else:
+        print(country)
+        units = []
+        for order in row.find_elements(By.CLASS_NAME,"orderstring"):
+            order_txt = order.text.lower()
+            order_txt = order_txt.replace("/","_")
+            units.append(order_txt)
+            print("\t"+order_txt)
+        game.players[country].set_units(units)
+'''
+
 while True:
+    print("script ended")
     sleep(600)
