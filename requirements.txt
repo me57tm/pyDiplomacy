@@ -1,8 +1,9 @@
-pyttsx3
-gTTS
-openai
-pygame
-pydantic
-flask
-selenium
+pyttsx3~=2.98
+gTTS~=2.5.4
+openai~=1.61.1
+pygame~=2.6.1
+pydantic~=2.10.6
+flask~=3.0.3
+selenium~=4.33.0
 flask_socketio
+requests~=2.32.3
