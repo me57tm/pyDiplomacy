@@ -1,4 +1,6 @@
 # Deepseek, GPT 4o, Gemini, Azure AI Service (phi)????, MEta LLama, Grok? there's also one called claude
+import re
+
 from gtts import gTTS
 import pyttsx3
 import requests
@@ -555,6 +557,9 @@ class Disband(BaseModel):
 
 
 class Voice:
+    RE_TILES = " (" + "".join((t + "|" if len(t) == 3 else "") for t in board.keys()) + ") "
+    RE_UNIT_TILES = re.compile("([af])" + RE_TILES)
+    RE_TILES = re.compile(RE_TILES)
     AVAILABLE = {
         'Austria': [('streamElements', 'Michael'), ('streamElements', 'Karsten'), ('streamElements', 'Szabolcs'),
                     ('streamElements', 'hu-HU-Wavenet-A'), ('gTTS', 'hu hu')],
@@ -608,7 +613,28 @@ class Voice:
     def __repr__(self):
         return '{"service": "' + self.service + '", "name": "' + self.name + '"}'
 
+    @staticmethod
+    def clean(txt):
+        txt = txt.lower()
+        txt = txt.replace("stp_sc", "stp")
+        txt = txt.replace("stp_nc", "stp")
+        txt = txt.replace("spa_sc", "spa")
+        txt = txt.replace("spa_nc", "spa")
+        txt = txt.replace("bul_sc", "bul")
+        txt = txt.replace("bul_ec", "bul")
+        txt = txt.replace("->","to")
+        txt = txt.replace(" - ", "to")
+        global board
+        while match := re.search(Voice.RE_UNIT_TILES, txt):
+            i = match.span()[0]
+            txt = txt[:i] + ("army" if txt[i] == "a" else "fleet") + txt[i+1:]
+        while match := re.search(Voice.RE_TILES, txt):
+            i = match.span()[0]
+            txt = txt[:i+1] + board[txt[i+1: i+4]].name + txt[i + 4:]
+        return txt
+
     def say(self, txt):
+        txt = self.clean(txt)
         if self.service == "streamElements":
             response = requests.get("https://api.streamelements.com/kappa/v2/speech",
                                     params={"voice": self.name, "text": txt})
@@ -751,6 +777,10 @@ class Player(SimpleNamespace):
     def submitted(self):
         return self.orders == ""
 
+    def system_message(self, message):
+        if self.ui:
+            socketio.emit("add_press", {"type": "banner", "text": message})
+
 
 class Game(SimpleNamespace):
     global board
@@ -829,14 +859,18 @@ class OpenAIPlayer(Player):
                 case "Germany":
                     v = ("streamElements", "de-DE-Wavenet-B")
                 case "Italy":
-                    v = ("streamElements", "Giorgio")
+                    v = ('streamElements', 'it-IT-Wavenet-C')
                 case "Turkey":
                     v = ("streamElements", "tr-TR-Wavenet-E")
                 case "Russia":
-                    v = ("streamElements", "ru-RU-Wavenet-A")
+                    v = ('streamElements', 'ru-RU-Wavenet-A')
                 case "England":
                     v = ("gTTS", "en co.uk")
         self.voice = Voice(v[0], v[1])
+
+    def system_message(self, message):
+        super().system_message(message)
+        self.history.append({"role": "user", "content": message})
 
     def dump_history(self):
         history_file = open("history/" + self.country + ".txt", "w")
@@ -874,7 +908,7 @@ class OpenAIPlayer(Player):
             answer = self.prompt("You have submitted your orders for this turn, do you want to respond to the " + str(
                 len(self.message_queue)) + " message(s) in the queue.", YesNo)
             if answer.yn == YN.N:
-                print("Does not want to communicate further")
+                # print("Does not want to communicate further")
                 return 1
 
         # Generate the response from the AI.
@@ -885,12 +919,12 @@ class OpenAIPlayer(Player):
             for message in self.message_queue:
                 message_text += str(message)
                 if self.ui:
-                    print(str(message))
+                    # print(str(message))
                     socketio.emit("update_screen", {"country_image": message.sender + ".svg", "model_image": [
                         random.choice(["ChatGPT_White.svg", "DeepSeek.svg", "Gemini.svg", "Google.svg"])]})
                     socketio.emit("add_press",
                                   {"type": "message", "sender": message.sender,
-                                   "recipients": [country.name for country in message.to],
+                                   "recipients": [country.name.title() for country in message.to],
                                    "body": message.body})
                     game.players[message.sender].voice.say(message.body)
                     socketio.emit("update_screen", {"screen": "off"})
@@ -919,7 +953,7 @@ class OpenAIPlayer(Player):
             if self.ui:
                 socketio.emit("add_press",
                               {"type": "message", "sender": self.country,
-                               "recipients": [country.name for country in message.to],
+                               "recipients": [country.name.title() for country in message.to],
                                "body": message.body})
             for country in message.to:
                 game.players[country.value].message_queue.append(message)
@@ -930,7 +964,7 @@ class OpenAIPlayer(Player):
         prompt_text = game.start_turn() + game.supply_control_str() + ". " + game.VALID_TILES + ". Please submit your orders for this turn."
         orders = self.prompt(prompt_text, Orders)
         for unused in range(3):
-            print(orders)
+            # print(orders)
             # Give the AI 3 attempts to make a valid set of moves
             errs = []
             current_attempt = []
@@ -944,7 +978,7 @@ class OpenAIPlayer(Player):
                 history_string += str(a) + ", "
 
             # print(current_attempt)
-            print(errs)
+            # print(errs)
             self.history.append({"role": "assistant", "content": history_string})
             if len(errs) == 0:
                 break
@@ -982,27 +1016,6 @@ class OpenAIPlayer(Player):
             return self.prompt(prompt_text, Disband)
 
 
-def backstab_import():
-    x = []
-    for i in range(100):
-        x.append(input())
-        if x[-3:] == ["", "", ""]:
-            break
-    boardstate = ""
-    for i in x:
-        if i == "":
-            continue
-        i = i.replace("/", "_")
-        if i[:2] == "A " or i[:2] == "F ":
-            boardstate = boardstate + i.lower()
-        else:
-            boardstate = boardstate + i + ","
-        boardstate = boardstate + "\n"
-    print(boardstate)
-    global board_state
-    board_state = boardstate + "|"
-
-
 def adjudicate(orders):
     global board
     global game
@@ -1013,7 +1026,8 @@ def adjudicate(orders):
         new_order_list = []
         doneTiles = []
         for order in order_list:
-            order = convert_order_to_strict(order)
+            if type(order) == Order:
+                order = convert_order_to_strict(order)
             # print(order, order.check_validity(key))
             if type(order) != InvalidOrder:
                 if order.check_validity(key)[0] == False:
@@ -1064,14 +1078,14 @@ GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
 game.players = {
     "England": OpenAIPlayer("England", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False),
-    "Austria": OpenAIPlayer("Austria", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False, ui=True),
-    "Italy": OpenAIPlayer("Italy", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False, ),
-    "Turkey": OpenAIPlayer("Turkey", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False, ),
-    "Germany": OpenAIPlayer("Germany", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False, ),
-    "Russia": OpenAIPlayer("Russia", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False, ),
+    "Austria": OpenAIPlayer("Austria", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False,
+                            personality=get_personality(1), ui=True),
+    "Italy": OpenAIPlayer("Italy", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False, personality=get_personality(1)),
+    "Turkey": OpenAIPlayer("Turkey", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False, personality=get_personality(1)),
+    "Germany": OpenAIPlayer("Germany", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False, personality=get_personality(1)),
+    "Russia": OpenAIPlayer("Russia", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False, personality=get_personality(1)),
     "France": OpenAIPlayer("France", GEMINI_KEY, "gemini-2.0-flash", GEMINI_URL, False, ),
 }
-
 # Set up Selenium.
 driver = webdriver.Chrome()
 driver.get("https://www.backstabbr.com/")
@@ -1079,7 +1093,7 @@ bs = open("../backstabbr.txt")
 session_cookie = bs.readline()
 bs.close()
 driver.add_cookie({"name": "session", "value": session_cookie})
-driver.get("https://www.backstabbr.com/sandbox/5192838545276928/")
+driver.get("https://www.backstabbr.com/sandbox/5114939252277248/")
 actions = ActionChains(driver)
 
 '''import pickle
@@ -1087,7 +1101,7 @@ actions = ActionChains(driver)
 fo = open("history/dill.dat", "rb")
 orders = pickle.load(fo)
 fo.close()
-'''
+print(orders)'''
 
 
 # Selenium Functions
@@ -1130,31 +1144,39 @@ def submit_orders():
 
 
 def screenshot_map():
-    driver.maximize_window()
+    # driver.maximize_window()
     x = driver.find_element(By.TAG_NAME, "svg")
     y = x.screenshot_as_png
-    fo = open("map.png", "wb")
+    fo = open("static/map.png", "wb")  # I know this isn't static anymore because we're changing it but nobody tell
+    # flask and we'll be ok.
     fo.write(y)
     fo.close()
+    print("refreshing")
+    socketio.emit("refresh_map", {})
 
 
 def get_map_state():
     order_box = driver.find_element(By.ID, "orders-text")
+    map_state = ""
     for row in order_box.find_elements(By.XPATH, "//tr"):
         country = row.find_element(By.CLASS_NAME, "country").text
         if country == "":
             continue
         else:
-            print(country)
+            map_state += country + "\n"
             for order in row.find_elements(By.CLASS_NAME, "orderstring"):
                 order_txt = order.text.lower()
                 order_txt = order_txt.replace("/", "_")
-                print("\t" + order_txt)
+                map_state += "\t" + order_txt + "\n"
     screenshot_map()
+    return map_state
 
 
 # Use selenium to input the orders into backstabbr, and then retreive the results.
 def end_season(orders):
+    global game
+    global board
+    socketio.emit("add_press", {"type": "banner", "text": "Orders are in: Adjudicating..."})
     orders = adjudicate(orders)
     # Input Orders
     start_season = driver.find_element(By.ID, "history_current_season")
@@ -1183,12 +1205,13 @@ def end_season(orders):
 
     sleep(0.5)
     # Grab Results & Take Screenshot
-    driver.find_element(By.ID, "history_previous_season").click()
-    # TODO: ADD TO HISTORY OF PLAYERS
-    get_map_state()
+    actions.move_to_element(driver.find_element(By.ID, "history_previous_season")).click().perform()
+    results = get_map_state()
+    for player in game.players.values():
+        player.system_message(results)
 
     # Grab Current Board State
-    driver.find_element(By.ID, "history_next_season").click()
+    actions.move_to_element(driver.find_element(By.ID, "history_next_season")).click().perform()
 
     season = driver.find_element(By.ID, "history_current_season")
     season = season.text.split(" ")[0]
@@ -1278,11 +1301,12 @@ def end_season(orders):
                         i += 1
 
         submit_orders()
-        driver.find_element(By.ID, "history_previous_season").click()
-        get_map_state()
+        sleep(1)
+        actions.move_to_element(driver.find_element(By.ID, "history_previous_season")).click().perform()
+        print(get_map_state())
 
         # Grab Current Board State
-        driver.find_element(By.ID, "history_next_season").click()
+        actions.move_to_element(driver.find_element(By.ID, "history_next_season")).click().perform()
 
     order_box = driver.find_element(By.ID, "orders-text")
     for row in order_box.find_elements(By.XPATH, "//tr"):
@@ -1298,36 +1322,51 @@ def end_season(orders):
                 units.append(order_txt)
                 print("\t" + order_txt)
             game.players[country].set_units(units)
+    game.turn += 1
 
 
 def main():
+    sleep(5)
+    input("Press Enter to Start")
+    screenshot_map()
+    socketio.emit("add_press", {"type": "banner", "text": "Spring 1901"})
     gamers = [x for x in game.players.keys()]
-    submitted = set()
-    for i in range(21, 0, -1):
-        if len(submitted) == 7:
-            break
-        print("Threshold:", i / 20)
-        print(submitted)
-        for x in gamers:
-            print(x)
-            # print(game.players[x].message_queue)
-            y = game.players[x].gen_discussion()
-            print(game.players[x].history)  # [-1]["content"])
-            print(y)
-            if y >= i / 20 and x not in submitted:
-                print(game.players[x].gen_orders())
-                submitted.add(x)
-                if len(submitted) == 7:
-                    break
+    SPEAKING_TURNS = 2  # 20
 
-    for player in game.players.values():
-        print(player.country)
-        for order in player.orders:
-            print("\t", order)
+    for j in range(5):
+        submitted = set()
+        print(game.start_turn())
+        for i in range(SPEAKING_TURNS + 1, 0, -1):
+            if len(submitted) == 7:
+                break
+            # print("Threshold:", i / SPEAKING_TURNS)
+            # print(submitted)
+            last_moved = gamers[-1]
+            while gamers[0] == last_moved:
+                gamers = gamers.suffle()
+
+            for x in gamers:
+                # print(x)
+                # print(game.players[x].message_queue)
+                y = game.players[x].gen_discussion()
+                if x == "Austria":
+                    print(y)
+                # print(game.players[x].history)  # [-1]["content"])
+                # print(y)
+                if y >= i / SPEAKING_TURNS and x not in submitted:
+                    print(game.players[x].gen_orders())
+                    submitted.add(x)
+                    if len(submitted) == 7:
+                        break
+        orders = {}
+        for country in gamers:
+            orders[country] = game.players[country].orders
+            game.players[country].message_queue = []
+            game.players[country].orders = []
+        end_season(orders)
+
 
 
 main_thread = threading.Thread(target=main)
 main_thread.start()
 socketio.run(app, allow_unsafe_werkzeug=True)
-sleep(5)
-socketio.emit("add_press", {"type": "banner", "text": "Spring 1901"})
